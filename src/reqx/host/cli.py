@@ -8,10 +8,11 @@ from typing import Optional
 
 import typer
 
-from reqx.host.composition import Config, extract
+from reqx.host.composition import Config, extract, status
 from reqx.kernel.llm import LLMError
 from reqx.modules.discovery.facade import DiscoveryFacade
 from reqx.modules.report.facade import ExtractionResult, to_markdown
+from reqx.modules.staleness.facade import summary
 
 app = typer.Typer(add_completion=False, no_args_is_help=True,
                   help="Extract user requirements from a codebase, with verified citations.")
@@ -91,3 +92,19 @@ def render_command(
 def schema_command() -> None:
     """Print the JSON Schema of the result."""
     typer.echo(json.dumps(ExtractionResult.model_json_schema(), indent=1))
+
+
+@app.command("status")
+def status_command(
+    file: Path = typer.Argument(..., help="A JSON result written by `reqx extract`."),
+    root: Path = typer.Option(Path("."), "--root", help="The repository the result was made from."),
+    as_json: bool = typer.Option(False, "--json", help="Print the report as JSON."),
+) -> None:
+    """Show which requirements rest on files that have changed or gone. No model is called."""
+    try:
+        report = status(file, root)
+    except (OSError, ValueError) as error:   # a pydantic ValidationError is a ValueError
+        _say(f"error: {file} is not a valid result: {error}")
+        raise typer.Exit(2)
+    typer.echo(report.model_dump_json(indent=1) if as_json else summary(report))
+    raise typer.Exit(0 if report.all_current else 1)

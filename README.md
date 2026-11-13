@@ -25,6 +25,15 @@ reqx extract ./repo --include "src/**" --exclude "**/migrations/**" -o reqs.json
 reqx render reqs.json -o REQUIREMENTS.md
 ```
 
+```bash
+reqx status reqs.json --root ./repo
+```
+
+`status` compares a saved result with the files on disk and lists the requirements whose cited
+files have changed (`stale`) or gone (`source_missing`). It calls no model. Exit code 0 when
+everything is current, 1 otherwise, 2 for a file that is not a result. `--json` prints the
+report as JSON; in Python, `reqx.status(result_or_path, root)` returns it.
+
 ```python
 from reqx import Config, extract
 
@@ -85,6 +94,6 @@ python3 -m pytest -q
 
 ## Not built yet
 
-Triage, the editable capabilities file, the review file and durable ids, staleness, the
+Triage, the editable capabilities file, the review file and durable ids, the
 triage audit, tree-sitter, a Codex adapter, token budgets, and every renderer other than
 Markdown. See the spec.

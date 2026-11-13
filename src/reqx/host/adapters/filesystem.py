@@ -26,7 +26,10 @@ class DiskRepo:
         return sorted(inside)
 
     def read(self, path: str) -> bytes:
-        return (self.root / path).read_bytes()
+        full = (self.root / path).resolve()
+        if self.root not in full.parents:   # a path or symlink that leaves the root is never followed
+            raise PermissionError(f"{path} is outside the root")
+        return full.read_bytes()
 
     def _git_paths(self) -> list[str] | None:
         try:
