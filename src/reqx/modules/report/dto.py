@@ -9,6 +9,7 @@ from reqx.modules.capabilities.facade import Capability
 from reqx.modules.evidence.facade import Observation, Rejected
 from reqx.modules.report.domain import FileCoverage
 from reqx.modules.requirements.facade import Requirement
+from reqx.modules.review.facade import ReviewSummary
 
 SCHEMA_VERSION = "0.1"
 
@@ -35,6 +36,7 @@ class Diagnostics(BaseModel):
     rejected: list[Rejected] = Field(default_factory=list)
     failed_capabilities: dict[str, str] = Field(default_factory=dict)
     open_questions: dict[str, list[str]] = Field(default_factory=dict)
+    review: ReviewSummary | None = None   # set when ids were carried forward or a review file applied
 
 
 class ExtractionResult(BaseModel):

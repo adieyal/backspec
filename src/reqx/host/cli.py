@@ -8,12 +8,14 @@ from typing import Annotated, Optional
 
 import typer
 
-from reqx.host.composition import CAPABILITIES_FILE, Config, extract, orient, status
+from reqx.host.composition import (CAPABILITIES_FILE, Config, default_previous, extract, load_result, orient,
+                                   review_requirement, status)
 from reqx.kernel.llm import LLMError
 from reqx.modules.capabilities.facade import CapabilitiesFileError
 from reqx.modules.discovery.facade import DiscoveryFacade
 from reqx.modules.report.facade import ExtractionResult, to_markdown
 from reqx.modules.staleness.facade import summary
+from reqx.modules.review.facade import UnknownRequirement
 
 app = typer.Typer(add_completion=False, no_args_is_help=True,
                   help="Extract user requirements from a codebase, with verified citations.")
@@ -30,7 +32,7 @@ NoCache = Annotated[bool, typer.Option(help="Do not read or write the cache.")]
 Replay = Annotated[bool, typer.Option(help="Serve every call from the cache; fail on a miss.")]
 CapabilitiesOpt = Annotated[Optional[Path], typer.Option(
     "--capabilities", help=f"The capabilities file. Default: {CAPABILITIES_FILE} under PATH.")]
-ERRORS = (LLMError, NotADirectoryError, CapabilitiesFileError)
+ERRORS = (LLMError, OSError, ValueError)   # CapabilitiesFileError and a bad result file are ValueErrors
 
 
 def _say(message: str) -> None:
@@ -65,6 +67,9 @@ def extract_command(
     gate: bool = typer.Option(False, help="Write the capabilities file if there is none, then stop before "
                                           "assignment and synthesis."),
     dry_run: bool = typer.Option(False, help="List the files that would be read, and stop."),
+    review: Optional[Path] = typer.Option(None, "--review", help="The review file. Default: reqx.review.yaml in PATH, if present."),
+    previous: Optional[Path] = typer.Option(None, "--previous", help="An earlier JSON result whose ids to carry forward. "
+                                            "Default: the -o file, if it already exists."),
 ) -> None:
     """Run the pipeline on PATH."""
     if fmt not in ("json", "md"):
@@ -83,7 +88,8 @@ def extract_command(
     config = Config(include=include, exclude=exclude, default_excludes=not no_default_excludes,
                     assess_support=not no_assess_support, provider=provider, fast_model=fast_model,
                     strong_model=model, concurrency=concurrency, cache_dir=cache_dir,
-                    use_cache=not no_cache, replay=replay, capabilities_file=capabilities, gate=gate)
+                    use_cache=not no_cache, replay=replay, capabilities_file=capabilities, gate=gate,
+                    review_file=review, previous=default_previous(previous, output, fmt))
     try:
         result = extract(path, config, progress=_say)
     except ERRORS as error:
@@ -133,7 +139,7 @@ def render_command(
     technical: bool = typer.Option(False, help="Include technical-level requirements."),
 ) -> None:
     """Turn a saved JSON result into Markdown. No model is called."""
-    result = ExtractionResult.model_validate_json(file.read_text(encoding="utf-8"))
+    result = load_result(file)
     _emit(to_markdown(result, include_technical=technical), output)
 
 
@@ -157,3 +163,27 @@ def status_command(
         raise typer.Exit(2)
     typer.echo(report.model_dump_json(indent=1) if as_json else summary(report))
     raise typer.Exit(0 if report.all_current else 1)
+
+
+@app.command("review")
+def review_command(
+    file: Path = typer.Argument(..., help="A JSON result written by `reqx extract`."),
+    requirement_id: str = typer.Argument(..., metavar="REQ-ID", help="The requirement to review."),
+    confirm: bool = typer.Option(False, "--confirm", help="The requirement is right."),
+    reject: bool = typer.Option(False, "--reject", help="The requirement is wrong; hide it."),
+    statement: Optional[str] = typer.Option(None, "--statement", help="Replace the statement."),
+    condition: list[str] = typer.Option([], "--condition", help="With --statement: a condition. Repeatable."),
+    reviewer: Optional[str] = typer.Option(None, "--reviewer", help="Who decided. Default: the current user."),
+    note: Optional[str] = typer.Option(None, "--note"),
+    review: Optional[Path] = typer.Option(None, "--review", help="The review file. Default: reqx.review.yaml here."),
+) -> None:
+    """Record a decision about one requirement, to be applied by later runs."""
+    try:
+        typer.echo(review_requirement(file, requirement_id, confirm=confirm, reject=reject, statement=statement,
+                                      conditions=condition, reviewer=reviewer, note=note, review_file=review))
+    except UnknownRequirement:
+        _say(f"error: {requirement_id} is not in {file}")
+        raise typer.Exit(2)
+    except (OSError, ValueError) as error:
+        _say(f"error: {error}")
+        raise typer.Exit(2)

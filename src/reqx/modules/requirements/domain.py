@@ -45,6 +45,7 @@ class Requirement(BaseModel):
     scope: Literal["local", "cross_file"]
     support: Support = "not_assessed"
     support_note: str = ""
+    review: Literal["unreviewed", "confirmed", "edited", "needs_review"] = "unreviewed"
     evidence: list[Evidence]
 
 
