@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from reqx.modules.capabilities.facade import Capability
 from reqx.modules.evidence.facade import Observation, Rejected
+from reqx.modules.lint.facade import Finding
 from reqx.modules.report.domain import FileCoverage
 from reqx.modules.requirements.facade import Requirement
 from reqx.modules.review.facade import ReviewSummary
@@ -44,6 +45,7 @@ class Diagnostics(BaseModel):
     dropped_scenarios: int = 0   # scenarios the model wrote that were left out (incomplete or uncited)
     open_questions: dict[str, list[str]] = Field(default_factory=dict)
     review: ReviewSummary | None = None   # set when ids were carried forward or a review file applied
+    lint: list[Finding] = Field(default_factory=list)   # deterministic checks on the finished result
 
 
 class ExtractionResult(BaseModel):

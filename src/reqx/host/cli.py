@@ -8,12 +8,15 @@ from typing import Annotated, Optional
 
 import typer
 
-from reqx.host.composition import (CAPABILITIES_FILE, Config, default_previous, extract, load_result, orient,
-                                   review_requirement, status, write_tree)
+from reqx.host.adapters.cache_admin import NotACache, describe
+from reqx.host.composition import (CAPABILITIES_FILE, Config, cache_clear, cache_info, default_previous, extract,
+                                   load_result, orient, review_requirement, status, validate, write_tree)
 from reqx.kernel.llm import LLMError
 from reqx.modules.capabilities.facade import CapabilitiesFileError
 from reqx.modules.discovery.facade import DiscoveryFacade
-from reqx.modules.report.facade import ExtractionResult, RenderOutput, formats, render
+from reqx.modules.lint.facade import summary as lint_summary
+from reqx.modules.report.facade import (ExtractionResult, RenderOutput, coverage_report, coverage_text, formats,
+                                        render)
 from reqx.modules.staleness.facade import summary
 from reqx.modules.review.facade import UnknownRequirement
 
@@ -218,3 +221,69 @@ def review_command(
     except (OSError, ValueError) as error:
         _say(f"error: {error}")
         raise typer.Exit(2)
+
+
+@app.command("validate")
+def validate_command(
+    file: Path = typer.Argument(..., help="A JSON result written by `reqx extract`."),
+    as_json: bool = typer.Option(False, "--json", help="Print the findings as JSON."),
+    strict: bool = typer.Option(False, "--strict", help="Count warnings as errors."),
+) -> None:
+    """Check a saved result against the schema, then lint it. No model is called."""
+    try:
+        report = validate(file)
+    except (OSError, ValueError) as error:
+        _say(f"error: {file} is not a valid result: {error}")
+        raise typer.Exit(2)
+    typer.echo(report.model_dump_json(indent=1) if as_json else lint_summary(report))
+    raise typer.Exit(1 if report.failed(strict) else 0)
+
+
+@app.command("coverage")
+def coverage_command(
+    file: Path = typer.Argument(..., help="A JSON result written by `reqx extract`."),
+    as_json: bool = typer.Option(False, "--json", help="Print the report as JSON."),
+    show_all: bool = typer.Option(False, "--all", help="Do not truncate long lists."),
+) -> None:
+    """Show what happened to every file of a saved result. No model is called."""
+    try:
+        report = coverage_report(load_result(file))
+    except (OSError, ValueError) as error:
+        _say(f"error: {file} is not a valid result: {error}")
+        raise typer.Exit(2)
+    typer.echo(report.model_dump_json(indent=1) if as_json else coverage_text(report, show_all))
+
+
+cache_app = typer.Typer(no_args_is_help=True, help="Look at or empty the cache of model replies.")
+app.add_typer(cache_app, name="cache")
+CachePath = Annotated[Path, typer.Argument(help="The repository whose cache to use.")]
+CacheDirOpt = Annotated[Optional[Path], typer.Option("--cache-dir", help="The cache folder, instead of the default for PATH.")]
+
+
+@cache_app.command("info")
+def cache_info_command(path: CachePath = Path("."), cache_dir: CacheDirOpt = None) -> None:
+    """Print the cache folder, the cached replies per stage and their size."""
+    try:
+        typer.echo(describe(cache_info(path, cache_dir)))
+    except NotACache as error:
+        _say(f"error: {error}")
+        raise typer.Exit(2)
+
+
+@cache_app.command("clear")
+def cache_clear_command(
+    path: CachePath = Path("."), cache_dir: CacheDirOpt = None,
+    yes: bool = typer.Option(False, "--yes", help="Actually delete. Without it, only report."),
+) -> None:
+    """Delete the cached replies of a repository. Reports only, unless --yes."""
+    try:
+        info = cache_clear(path, cache_dir, delete=yes)
+    except NotACache as error:
+        _say(f"error: {error}")
+        raise typer.Exit(2)
+    if yes:
+        typer.echo(f"deleting {info.total} cached replies ({info.size} bytes) from {info.directory}")
+        typer.echo("deleted")
+    else:
+        typer.echo(f"would delete {info.total} cached replies ({info.size} bytes) from {info.directory}; "
+                   "nothing deleted, pass --yes to delete")

@@ -60,6 +60,21 @@ files have changed (`stale`) or gone (`source_missing`). It calls no model. Exit
 everything is current, 1 otherwise, 2 for a file that is not a result. `--json` prints the
 report as JSON; in Python, `reqx.status(result_or_path, root)` returns it.
 
+```bash
+reqx validate reqs.json            # lint: exit 0 clean (warnings allowed), 1 errors, 2 not a result
+reqx validate reqs.json --strict   # warnings count as errors; --json prints the findings
+reqx coverage reqs.json            # files per state, unused observations, files worth a look; --all, --json
+reqx cache info ./repo             # the cache folder, replies per stage, size; --cache-dir PATH
+reqx cache clear ./repo --yes      # without --yes, only reports what it would delete
+```
+
+`validate` checks a saved result against the schema, then runs deterministic checks: errors for
+a citation that points at nothing, an unknown capability or a duplicate id, warnings for vague,
+compound or weakly supported requirements. Every extraction runs the same checks and stores the
+findings in `diagnostics.lint`. In Python, `reqx.validate(result_or_path)` returns the report.
+`coverage` reads only the saved result. `cache clear` deletes only files named
+`<stage>-<hex>.json` and refuses a folder that holds anything else.
+
 Requirement ids last between runs: a run carries them forward from the previous result by how
 much the cited code overlaps, so rewording a statement keeps its id. `-o` names the previous
 result when that file already exists, or give `--previous FILE`. Record a decision, and the next
@@ -91,7 +106,10 @@ for capability in orient("./repo"):   # writes the capabilities file
 ```
 
 The default model backend is the Claude Code CLI, using the login you already have. It must be
-installed. To use anything else, pass an object with a `complete(request) -> str` method as
+installed. `--provider codex` uses the Codex CLI instead (`codex exec`, read-only sandbox, prompt on
+stdin). **That adapter has not been run against the real Codex CLI**: it was written from the
+documented interface and tested only against a fake `codex` script; its flags are listed in
+`src/reqx/host/adapters/codex.py` and should be checked first. To use anything else, pass an object with a `complete(request) -> str` method as
 `Config(provider=...)`.
 
 A model does not describe the same file the same way twice, so reqx asks it only about what
@@ -160,4 +178,5 @@ python3 -m pytest -q
 ## Not built yet
 
 Triage, the
-triage audit, tree-sitter, a Codex adapter, token budgets, and the HTML renderer. See the spec.
+triage audit, tree-sitter, token budgets, and the HTML renderer. The Codex adapter exists but is
+unverified against the real CLI. See the spec.

@@ -10,8 +10,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from reqx.host.adapters.cache import CachedLLM
+from reqx.host.adapters import cache_admin
 from reqx.host.adapters.capabilities_file import YamlCapabilitiesFile
 from reqx.host.adapters.claude_code import ClaudeCode
+from reqx.host.adapters.codex import Codex
 from reqx.host.adapters.filesystem import DiskRepo
 from reqx.host.adapters.review_yaml import YamlReviewStore
 from reqx.kernel.llm import LLMError, LLMPort
@@ -19,6 +21,7 @@ from reqx.modules.capabilities.facade import CapabilitiesFacade, Capability
 from reqx.modules.discovery.facade import DiscoveryFacade
 from reqx.modules.evidence.facade import EvidenceFacade
 from reqx.modules.extraction.facade import Progress, Settings, orient_only, run
+from reqx.modules.lint.facade import LintReport, lint
 from reqx.modules.report.facade import ExtractionResult
 from reqx.modules.requirements.facade import RequirementsFacade
 from reqx.modules.review.facade import ReviewFacade
@@ -61,7 +64,9 @@ def _provider(config: Config) -> tuple[LLMPort, str]:
         return config.provider, getattr(config.provider, "name", type(config.provider).__name__)
     if config.provider == "claude-code":
         return ClaudeCode(config.fast_model, config.strong_model), "claude-code"
-    raise LLMError(f"Unknown provider {config.provider!r}. This version ships `claude-code`; "
+    if config.provider == "codex":
+        return Codex(config.fast_model, config.strong_model), "codex"
+    raise LLMError(f"Unknown provider {config.provider!r}. This version ships `claude-code` and `codex`; "
                    "pass a provider object to use another.")
 
 
@@ -109,6 +114,28 @@ def status(result: ExtractionResult | str | Path, root: str | Path = ".") -> Sta
     if not isinstance(result, ExtractionResult):
         result = ExtractionResult.model_validate_json(Path(result).read_text(encoding="utf-8"))
     return StalenessFacade(DiskRepo(root)).check(result)
+
+
+def validate(result: ExtractionResult | str | Path) -> LintReport:
+    """Deterministic checks on a result (or the path of a saved one). No model is called.
+    Raises ValueError for a file that is not a valid result."""
+    if not isinstance(result, ExtractionResult):
+        result = load_result(Path(result))
+    return lint(result)
+
+
+def cache_directory(path: str | Path = ".", cache_dir: Path | None = None) -> Path:
+    """The cache folder for the repository at `path`, as `extract` would use it."""
+    return cache_dir or default_cache_dir(Path(path).resolve())
+
+
+def cache_info(path: str | Path = ".", cache_dir: Path | None = None) -> cache_admin.CacheInfo:
+    return cache_admin.inspect(cache_directory(path, cache_dir))
+
+
+def cache_clear(path: str | Path = ".", cache_dir: Path | None = None, delete: bool = False) -> cache_admin.CacheInfo:
+    """What the cache holds, deleted when `delete`. Raises cache_admin.NotACache for a folder that is not one."""
+    return cache_admin.clear(cache_directory(path, cache_dir), delete)
 
 
 def orient(path: str | Path, config: Config | None = None, progress: Progress = lambda _: None,

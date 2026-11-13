@@ -13,6 +13,7 @@ from reqx.kernel.prompts import PROMPT_VERSION
 from reqx.modules.capabilities.facade import PLUMBING, UNASSIGNED, CapabilitiesFacade, Capability
 from reqx.modules.discovery.facade import DiscoveryFacade
 from reqx.modules.evidence.facade import EvidenceFacade
+from reqx.modules.lint.facade import lint_findings
 from reqx.modules.report.facade import Diagnostics, ExtractionResult, Run, build_coverage, earlier_evidence
 from reqx.modules.requirements.facade import Requirement, RequirementsFacade
 from reqx.modules.review.facade import ReviewFacade, ReviewSummary
@@ -78,10 +79,12 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
     if settings.gate:
         # Stopped on purpose: the run is `partial` and says where it stopped.
         progress("gate: stopping before assignment and synthesis; edit the file, then run again")
-        return ExtractionResult(
+        gated = ExtractionResult(
             run=describe("partial", stopped_after="capabilities"), capabilities=caps, requirements=[],
             observations=all_observations, assignments={}, coverage=build_coverage(found, observed, [], {}),
             diagnostics=Diagnostics(rejected=observed.rejected))
+        gated.diagnostics.lint = lint_findings(gated)
+        return gated
 
     if observed.observations:
         assignments = capabilities.assign(observed.observations, caps, kept.assignments if kept else None)
@@ -139,7 +142,7 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
     final = sorted(final, key=lambda r: (r.capability, r.id))
 
     complete = not observed.failed and not synthesis.failed
-    return ExtractionResult(
+    result = ExtractionResult(
         run=describe("complete" if complete else "partial", reused_capabilities=sorted(reused_capabilities)),
         capabilities=caps, requirements=final, hidden=sorted(hidden, key=lambda r: (r.capability, r.id)),
         observations=all_observations, assignments=assignments,
@@ -148,6 +151,8 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
                                 unconsolidated=synthesis.unconsolidated,
                                 dropped_scenarios=synthesis.dropped_scenarios, open_questions=open_questions,
                                 review=review_summary))
+    result.diagnostics.lint = lint_findings(result)
+    return result
 
 
 def _refreshed(requirement: Requirement, current: dict) -> Requirement:

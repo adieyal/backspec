@@ -5,7 +5,7 @@ import collections
 
 from reqx.modules.discovery.facade import Discovery
 from reqx.modules.evidence.facade import Earlier, ObservationSet, line_digest
-from reqx.modules.report.domain import FileCoverage, file_state
+from reqx.modules.report.domain import CoverageReport, FileCoverage, file_state, worth_looking_at
 from reqx.modules.report.dto import Coverage, ExtractionResult
 from reqx.modules.requirements.facade import Requirement
 
@@ -21,13 +21,24 @@ def build_coverage(discovery: Discovery, observed: ObservationSet, requirements:
         state, reason = file_state(per_file[source.path], rejected[source.path],
                                    observed.failed.get(source.path), nothing.get(source.path))
         files.append(FileCoverage(path=source.path, state=state, reason=reason, observations=per_file[source.path],
-                                  rejected=rejected[source.path], cited_by=cited[source.path],
+                                  rejected=rejected[source.path], lines=len(source.text.splitlines()), cited_by=cited[source.path],
                                   source_hash=source.source_hash, line_digest=line_digest(source.lines)))
     files.sort(key=lambda f: f.path)
     used = {e.observation for r in requirements for e in r.evidence}
     unused = collections.Counter(assignments.get(o.id, "unassigned") for o in observed.observations if o.id not in used)
     return Coverage(summary=dict(collections.Counter(f.state for f in files)), files=files,
                     unused_observations=dict(sorted(unused.items())))
+
+
+def coverage_report(result: ExtractionResult) -> CoverageReport:
+    """What a saved result says about its files. No model and no file system: only the result."""
+    by_state: dict[str, list[FileCoverage]] = {}
+    for entry in result.coverage.files:
+        if entry.state != "excluded":
+            by_state.setdefault(entry.state, []).append(entry)
+    return CoverageReport(counts=dict(result.coverage.summary), files=dict(sorted(by_state.items())),
+                          unused_observations=dict(result.coverage.unused_observations),
+                          worth_a_look=[e for e in result.coverage.files if worth_looking_at(e)])
 
 
 def earlier_evidence(previous: ExtractionResult, fingerprint: str) -> dict[str, Earlier]:

@@ -20,6 +20,7 @@ class FileCoverage(BaseModel):
     reason: str = ""
     observations: int = 0
     rejected: int = 0
+    lines: int = 0   # length of the file as it was read, for files that were read
     cited_by: int = 0   # requirements that cite this file
     source_hash: str = ""   # the file as it was read, for files that were read
     line_digest: str = ""   # a short digest per line, so a later run can tell which lines changed
@@ -83,3 +84,38 @@ def with_shall(statement: str) -> str:
     if _LOWER_MODAL.search(text):
         return _LOWER_MODAL.sub(lambda m: m.group(1).upper(), text)
     return f"The system SHALL ensure: {text}"
+WORTH_A_LOOK_LINES = 80
+TRUNCATE_AT = 30
+
+
+class CoverageReport(BaseModel):
+    """A saved result's coverage, read for people: what happened to each file and what to look at."""
+    counts: dict[str, int]
+    files: dict[str, list[FileCoverage]]   # state -> files, every state but `excluded`
+    unused_observations: dict[str, int]    # capability -> observations no requirement cites
+    worth_a_look: list[FileCoverage]
+
+
+def worth_looking_at(entry: FileCoverage) -> bool:
+    """A file that was read, is long, and yielded nothing or was never cited."""
+    return bool(entry.source_hash) and entry.lines > WORTH_A_LOOK_LINES and (
+        entry.observations == 0 or entry.cited_by == 0)
+
+
+def _clip(lines: list[str], show_all: bool) -> list[str]:
+    if show_all or len(lines) <= TRUNCATE_AT:
+        return lines
+    return lines[:TRUNCATE_AT] + [f"  ... and {len(lines) - TRUNCATE_AT} more (--all shows every line)"]
+
+
+def coverage_text(report: CoverageReport, show_all: bool = False) -> str:
+    out = ["files per state: " + (", ".join(f"{n} {s}" for s, n in sorted(report.counts.items())) or "none")]
+    for state, entries in report.files.items():
+        out += ["", f"{state} ({len(entries)}):"]
+        out += _clip([f"  {e.path}" + (f"  ({e.reason})" if e.reason else "") for e in entries], show_all)
+    out += ["", "unused observations per capability:"]
+    out += _clip([f"  {c}: {n}" for c, n in report.unused_observations.items()] or ["  none"], show_all)
+    out += ["", "worth a look (read, over %d lines, no observation or cited by no requirement):" % WORTH_A_LOOK_LINES]
+    out += _clip([f"  {e.path}  ({e.lines} lines, {e.observations} observations, cited by {e.cited_by})"
+                  for e in report.worth_a_look] or ["  none"], show_all)
+    return "\n".join(out)
