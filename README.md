@@ -83,6 +83,11 @@ The default model backend is the Claude Code CLI, using the login you already ha
 installed. To use anything else, pass an object with a `complete(request) -> str` method as
 `Config(provider=...)`.
 
+A model does not describe the same file the same way twice. So when a previous result is
+available (`--previous FILE`, or the `-o` file if it already exists), a file that has not changed
+keeps the observations that result made of it and is not read again. Only new and changed files
+go to the model. `--no-reuse` reads everything again.
+
 ## How it works
 
 1. **Discover.** List the files, apply the include and exclude patterns, take one snapshot of

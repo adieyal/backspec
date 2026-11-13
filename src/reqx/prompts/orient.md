@@ -10,8 +10,11 @@ capability usually draws on several files: server code, front-end code and tests
 
 ## Rules
 
-- Propose capabilities that together cover the observations: between 3 and 18, fewer for a
-  small product. Make them distinct; no two should overlap heavily.
+- Propose capabilities that together cover the observations. Let the number follow the amount of
+  evidence: about one capability for every 25 to 40 observations, never fewer than 2 and never
+  more than 18. A hundred observations is 3 or 4 capabilities, not 10.
+- Make them distinct; no two should overlap heavily. If two would share most of their
+  observations, they are one capability.
 - Size them evenly where you can. Avoid one giant capability and avoid tiny ones.
 - Add exactly one capability with id `plumbing` for observations that describe internal
   mechanics no user or operator would notice.

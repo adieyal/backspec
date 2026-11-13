@@ -60,6 +60,15 @@ class Observation(BaseModel):
     verified: Literal["exact", "repaired"]
 
 
+@dataclass(frozen=True)
+class Earlier:
+    """What an earlier run established about one file: the file as it was read then, and the
+    observations that verified. An unchanged file need not be read again."""
+    source_hash: str
+    observations: tuple["Observation", ...]
+    nothing_reason: str | None = None
+
+
 class Rejected(BaseModel):
     path: str
     lines: list[int]

@@ -19,7 +19,7 @@ from reqx.modules.capabilities.facade import CapabilitiesFacade, Capability
 from reqx.modules.discovery.facade import DiscoveryFacade
 from reqx.modules.evidence.facade import EvidenceFacade
 from reqx.modules.extraction.facade import Progress, Settings, orient_only, run
-from reqx.modules.report.facade import ExtractionResult
+from reqx.modules.report.facade import ExtractionResult, earlier_evidence
 from reqx.modules.requirements.facade import RequirementsFacade
 from reqx.modules.review.facade import ReviewFacade
 from reqx.modules.staleness.facade import StalenessFacade, StatusReport
@@ -47,6 +47,7 @@ class Config:
     gate: bool = False   # write the capabilities file if there is none, and stop before assignment
     review_file: Path | None = None   # default: reqx.review.yaml under the root, used only if it exists
     previous: Path | None = None      # a saved JSON result whose ids this run carries forward
+    reuse: bool = True                # keep the previous result's observations for files that have not changed
 
 
 def default_cache_dir(root: Path) -> Path:
@@ -89,13 +90,20 @@ def extract(path: str | Path, config: Config | None = None, progress: Progress =
     if config.review_file and not review_path.is_file():
         raise FileNotFoundError(f"review file not found: {review_path}")
     review_store = YamlReviewStore(review_path) if review_path.is_file() else None
-    previous = load_result(config.previous).requirements if config.previous else None
+    before = load_result(config.previous) if config.previous else None
+    if config.previous and root in Path(config.previous).resolve().parents:
+        # a result saved inside the repository is reqx's own output, never source to read
+        settings.exclude = [*settings.exclude, "/" + Path(config.previous).resolve().relative_to(root).as_posix()]
+    previous = before.requirements if before else None
+    evidence = EvidenceFacade(llm, config.concurrency)
+    earlier = earlier_evidence(before, evidence.fingerprint()) if before and config.reuse else None
     return run(root=root.name, provider=name, settings=settings,
                discovery=DiscoveryFacade(DiskRepo(root)),
-               evidence=EvidenceFacade(llm, config.concurrency),
+               evidence=evidence,
                capabilities=CapabilitiesFacade(llm, config.concurrency, store),
                requirements=RequirementsFacade(llm, config.concurrency),
-               usage=llm.usage, progress=progress, review=ReviewFacade(review_store), previous=previous)
+               usage=llm.usage, progress=progress, review=ReviewFacade(review_store), previous=previous,
+               earlier=earlier)
 
 
 def status(result: ExtractionResult | str | Path, root: str | Path = ".") -> StatusReport:

@@ -12,7 +12,7 @@ from typing import Callable
 from reqx.kernel.prompts import PROMPT_VERSION
 from reqx.modules.capabilities.facade import PLUMBING, UNASSIGNED, CapabilitiesFacade, Capability
 from reqx.modules.discovery.facade import DiscoveryFacade
-from reqx.modules.evidence.facade import EvidenceFacade
+from reqx.modules.evidence.facade import Earlier, EvidenceFacade
 from reqx.modules.report.facade import Diagnostics, ExtractionResult, Run, build_coverage
 from reqx.modules.requirements.facade import Requirement, RequirementsFacade
 from reqx.modules.review.facade import ReviewFacade, ReviewSummary
@@ -33,15 +33,16 @@ class Settings:
 def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade, evidence: EvidenceFacade,
         capabilities: CapabilitiesFacade, requirements: RequirementsFacade,
         usage: Callable[[], tuple[int, int]] = lambda: (0, 0), progress: Progress = lambda _: None,
-        review: ReviewFacade | None = None, previous: list[Requirement] | None = None) -> ExtractionResult:
+        review: ReviewFacade | None = None, previous: list[Requirement] | None = None,
+        earlier: dict[str, Earlier] | None = None) -> ExtractionResult:
     # An unusable capabilities file is refused before any file is read or model called.
     from_file = capabilities.load()
     found = discovery.discover(settings.include, settings.exclude, settings.default_excludes)
     progress(f"discovered {len(found.files)} files to read, {len(found.left)} left out")
 
-    observed = evidence.observe(list(found.files))
+    observed = evidence.observe(list(found.files), earlier)
     progress(f"observed {len(observed.observations)} verified, {len(observed.rejected)} rejected, "
-             f"in {observed.batches} batches")
+             f"in {observed.batches} batches; {observed.reused_files} unchanged files reused")
 
     caps: list[Capability] = []
     assignments: dict[str, str] = {}
@@ -63,6 +64,7 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         return ExtractionResult(
             run=Run(status="partial", tool_version=TOOL_VERSION, prompt_version=PROMPT_VERSION, provider=provider,
                     root=root, calls=calls, cached_calls=cached, capabilities_source=source,
+                    observe_fingerprint=evidence.fingerprint(), reused_files=observed.reused_files,
                     stopped_after="capabilities"),
             capabilities=caps, requirements=[],
             observations=sorted(observed.observations, key=lambda o: (o.path, o.lines[0], o.id)),
@@ -100,7 +102,8 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
     return ExtractionResult(
         run=Run(status="complete" if complete else "partial", tool_version=TOOL_VERSION,
                 prompt_version=PROMPT_VERSION, provider=provider, root=root, calls=calls, cached_calls=cached,
-                capabilities_source=source),
+                capabilities_source=source, observe_fingerprint=evidence.fingerprint(),
+                reused_files=observed.reused_files),
         capabilities=caps, requirements=final,
         observations=sorted(observed.observations, key=lambda o: (o.path, o.lines[0], o.id)),
         assignments=assignments,

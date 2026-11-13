@@ -1,4 +1,9 @@
-"""Observe: read every file in numbered batches and keep only what verifies."""
+"""Observe: read every file in numbered batches and keep only what verifies.
+
+A model does not give the same observations twice for the same file. So a file that has not
+changed since an earlier run keeps that run's observations, and only new or changed files are
+read. Everything built on observations, requirement ids included, is then stable between runs.
+"""
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
@@ -7,7 +12,8 @@ from dataclasses import dataclass, field
 from reqx.kernel import prompts
 from reqx.kernel.llm import LLMError, LLMPort, LLMRequest, ask
 from reqx.modules.discovery.facade import SourceFile
-from reqx.modules.evidence.domain import (Chunk, NothingFound, Observation, ObserveReply, Rejected,
+from reqx.kernel.text import short_hash
+from reqx.modules.evidence.domain import (Chunk, Earlier, NothingFound, Observation, ObserveReply, Rejected,
                                           pack, render, split_file, verify)
 
 BATCH_LINES = 1300
@@ -20,14 +26,37 @@ class ObservationSet:
     nothing: list[NothingFound] = field(default_factory=list)
     failed: dict[str, str] = field(default_factory=dict)   # path -> why its batch failed
     batches: int = 0
+    reused_files: int = 0   # unchanged since the earlier run, so not read again
 
 
-def observe(files: list[SourceFile], llm: LLMPort, workers: int = 4,
-            batch_lines: int = BATCH_LINES) -> ObservationSet:
+def fingerprint(batch_lines: int = BATCH_LINES) -> str:
+    """Changes whenever the way files are observed does. Earlier observations made another way
+    are not reused."""
+    return short_hash(prompts.load("observe"), batch_lines)
+
+
+def observe(files: list[SourceFile], llm: LLMPort, workers: int = 4, batch_lines: int = BATCH_LINES,
+            earlier: dict[str, Earlier] | None = None) -> ObservationSet:
     file_lines = {f.path: f.lines for f in files}
     hashes = {f.path: f.source_hash for f in files}
-    chunks = [chunk for f in files for chunk in split_file(f.path, f.lines, batch_lines)]
+    result = ObservationSet()
+    seen: set[str] = set()
+    to_read = []
+    for f in files:
+        known = (earlier or {}).get(f.path)
+        if known is None or known.source_hash != f.source_hash:
+            to_read.append(f)
+            continue
+        result.reused_files += 1
+        for observation in known.observations:
+            if observation.source_hash == f.source_hash and observation.id not in seen:
+                seen.add(observation.id)
+                result.observations.append(observation)
+        if known.nothing_reason is not None and not known.observations:
+            result.nothing.append(NothingFound(path=f.path, reason=known.nothing_reason))
+    chunks = [chunk for f in to_read for chunk in split_file(f.path, f.lines, batch_lines)]
     batches = pack(chunks, batch_lines)
+    result.batches = len(batches)
     instructions = prompts.load("observe")
 
     def run(batch: list[Chunk]) -> ObserveReply | LLMError:
@@ -36,10 +65,8 @@ def observe(files: list[SourceFile], llm: LLMPort, workers: int = 4,
         except LLMError as error:
             return error
 
-    result = ObservationSet(batches=len(batches))
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         replies = list(pool.map(run, batches))
-    seen: set[str] = set()
     for batch, reply in zip(batches, replies):
         shown = {chunk.path for chunk in batch}
         if isinstance(reply, LLMError):

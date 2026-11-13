@@ -23,6 +23,8 @@ class Run(BaseModel):
     calls: int = 0
     cached_calls: int = 0
     capabilities_source: Literal["file", "oriented"] = "oriented"
+    observe_fingerprint: str = ""   # how files were observed; a later run reuses observations only if it matches
+    reused_files: int = 0           # files unchanged since the previous result, not read again
     stopped_after: Literal["capabilities"] | None = None   # set when a gated run stopped early
 
 
