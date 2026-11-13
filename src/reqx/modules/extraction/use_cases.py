@@ -145,7 +145,8 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         observations=all_observations, assignments=assignments,
         coverage=build_coverage(found, observed, [*final, *hidden], assignments),
         diagnostics=Diagnostics(rejected=observed.rejected, failed_capabilities=synthesis.failed,
-                                unconsolidated=synthesis.unconsolidated, open_questions=open_questions,
+                                unconsolidated=synthesis.unconsolidated,
+                                dropped_scenarios=synthesis.dropped_scenarios, open_questions=open_questions,
                                 review=review_summary))
 
 
@@ -155,7 +156,11 @@ def _refreshed(requirement: Requirement, current: dict) -> Requirement:
     evidence = [e.model_copy(update={"path": current[e.observation].path, "lines": current[e.observation].lines,
                                      "quote": current[e.observation].quote})
                 if e.observation in current else e for e in requirement.evidence]
-    return requirement.model_copy(update={"review": "unreviewed", "evidence": evidence})
+    scenarios = [s.model_copy(update={"evidence": [
+        e.model_copy(update={"path": current[e.observation].path, "lines": current[e.observation].lines,
+                             "quote": current[e.observation].quote}) if e.observation in current else e
+        for e in s.evidence]}) for s in requirement.scenarios]
+    return requirement.model_copy(update={"review": "unreviewed", "evidence": evidence, "scenarios": scenarios})
 
 
 def orient_only(settings: Settings, discovery: DiscoveryFacade, evidence: EvidenceFacade,

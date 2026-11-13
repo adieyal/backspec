@@ -38,7 +38,18 @@ returns no requirements, with `run.status` `partial` and `run.stopped_after` `ca
 
 ```bash
 reqx render reqs.json -o REQUIREMENTS.md
+reqx render reqs.json --format csv -o reqs.csv            # one row per requirement and evidence pair
+reqx render reqs.json --format openspec -o spec/          # a directory; -o is required
+reqx extract ./repo --format csv -o reqs.csv
 ```
+
+Formats: `json`, `md` (default for `render`), `csv` and `openspec`; an unknown name is refused with
+the list. `csv` adds `--include-hidden` (a `hidden` column). `openspec` writes
+`specs/<capability>/spec.md`, `NOT_EXPORTED.md` and `README.md`. Only requirements with support
+`direct` or `partial` are exported, and, with `--strict` (the default), only those with a scenario.
+A scenario comes only from a test or example in the code and cites it; reqx never writes one to fill
+a gap. `--no-strict` keeps a requirement with no scenario and marks it as having none. A format is
+a function in `modules/report/renderers.py`, added to `RENDERERS`.
 
 ```bash
 reqx status reqs.json --root ./repo
@@ -149,5 +160,4 @@ python3 -m pytest -q
 ## Not built yet
 
 Triage, the
-triage audit, tree-sitter, a Codex adapter, token budgets, and every renderer other than
-Markdown. See the spec.
+triage audit, tree-sitter, a Codex adapter, token budgets, and the HTML renderer. See the spec.

@@ -36,6 +36,15 @@ class Evidence(BaseModel):
     quote: str
 
 
+class Scenario(BaseModel):
+    """One concrete case, in the form given / when / then, resting on observations that show it."""
+    name: str
+    given: str
+    when: str
+    then: str
+    evidence: list[Evidence]
+
+
 class Requirement(BaseModel):
     id: str
     capability: str
@@ -48,6 +57,7 @@ class Requirement(BaseModel):
     review: Literal["unreviewed", "confirmed", "edited", "needs_review"] = "unreviewed"
     evidence: list[Evidence]
     merged_from: list[str] = Field(default_factory=list)   # statements merged into this one
+    scenarios: list[Scenario] = Field(default_factory=list)
 
 
 class CitedObservation(BaseModel):
@@ -55,11 +65,20 @@ class CitedObservation(BaseModel):
     role: str = "establishes"
 
 
+class RawScenario(BaseModel):
+    name: str | None = None
+    given: str | None = None
+    when: str | None = None
+    then: str | None = None
+    evidence: list[CitedObservation] = Field(default_factory=list)
+
+
 class RawRequirement(BaseModel):
     statement: str
     conditions: list[str] = Field(default_factory=list)
     level: str = "user"
     evidence: list[CitedObservation] = Field(default_factory=list)
+    scenarios: list[RawScenario] = Field(default_factory=list)
 
 
 class SynthReply(BaseModel):
@@ -96,23 +115,62 @@ def synth_input(observations: list[Observed]) -> str:
     return "\n".join(out)
 
 
-def build(raw: RawRequirement, capability: str, known: dict[str, Observed]) -> Requirement | None:
-    """A requirement with its evidence copied from the observations it names, or None when it
-    names no real observation. Ids the model invented are dropped, not trusted."""
+def _copied(cited: list[CitedObservation], known: dict[str, Observed]) -> list[Evidence]:
+    """Evidence copied from the observations named; an id the model invented is dropped."""
     evidence = []
-    for cited in raw.evidence:
-        obs = known.get(cited.observation)
-        if obs is None:
+    for c in cited:
+        obs = known.get(c.observation)
+        if obs is not None:
+            evidence.append(Evidence(observation=obs.id, role="context" if c.role == "context" else "establishes",
+                                     path=obs.path, lines=obs.lines, quote=obs.quote))
+    return evidence
+
+
+def build_scenarios(raws: list[RawScenario], known: dict[str, Observed]) -> tuple[list[Scenario], int]:
+    """The scenarios that are complete (name, given, when and then all non-empty) and cite at
+    least one real observation, with evidence copied from it; and how many were dropped."""
+    kept: list[Scenario] = []
+    dropped = 0
+    for raw in raws:
+        parts = [(p or "").strip() for p in (raw.name, raw.given, raw.when, raw.then)]
+        evidence = _copied(raw.evidence, known)
+        if not all(parts) or not evidence:
+            dropped += 1
             continue
-        evidence.append(Evidence(observation=obs.id, role="context" if cited.role == "context" else "establishes",
-                                 path=obs.path, lines=obs.lines, quote=obs.quote))
+        kept.append(Scenario(name=parts[0], given=parts[1], when=parts[2], then=parts[3], evidence=evidence))
+    return _distinct_scenarios(kept), dropped
+
+
+def _scenario_key(s: Scenario) -> tuple[str, ...]:
+    return tuple(" ".join(t.lower().split()) for t in (s.name, s.given, s.when, s.then))
+
+
+def _distinct_scenarios(scenarios: list[Scenario]) -> list[Scenario]:
+    """The scenarios without repeats (same name and text), first one kept, order kept."""
+    seen: dict[tuple[str, ...], Scenario] = {}
+    for s in scenarios:
+        seen.setdefault(_scenario_key(s), s)
+    return list(seen.values())
+
+
+def build_requirement(raw: RawRequirement, capability: str, known: dict[str, Observed]) -> tuple[Requirement | None, int]:
+    """A requirement with its evidence copied from the observations it names, or None when it
+    names no real observation; and the number of its scenarios that were dropped. Ids the model
+    invented are dropped, not trusted."""
+    evidence = _copied(raw.evidence, known)
     if not evidence or not raw.statement.strip():
-        return None
+        return None, 0
+    scenarios, dropped = build_scenarios(raw.scenarios, known)
     level = raw.level if raw.level in ("user", "system", "technical") else "user"
     return Requirement(
         id="REQ-" + short_hash(capability, raw.statement), capability=capability,
         statement=raw.statement.strip(), conditions=raw.conditions, level=level,  # type: ignore[arg-type]
-        scope="cross_file" if len({e.path for e in evidence}) > 1 else "local", evidence=evidence)
+        scope="cross_file" if len({e.path for e in evidence}) > 1 else "local", evidence=evidence,
+        scenarios=scenarios), dropped
+
+
+def build(raw: RawRequirement, capability: str, known: dict[str, Observed]) -> Requirement | None:
+    return build_requirement(raw, capability, known)[0]
 
 
 def consolidate_input(requirements: list[Requirement]) -> str:
@@ -152,7 +210,8 @@ def merge_requirements(requirements: list[Requirement], groups: list[MergeGroup]
             id="REQ-" + short_hash(capability, statement), capability=capability, statement=statement,
             conditions=group.conditions, level=level,  # type: ignore[arg-type]
             scope="cross_file" if len({e.path for e in evidence.values()}) > 1 else "local",
-            evidence=list(evidence.values()), merged_from=[s.statement for s in sources])
+            evidence=list(evidence.values()), merged_from=[s.statement for s in sources],
+            scenarios=_distinct_scenarios([sc for source in sources for sc in source.scenarios]))
         merged_at[ids[0]] = merged
         absorbed.update(ids[1:])
     out: list[Requirement] = []
@@ -176,7 +235,8 @@ def _fold_same_id(requirements: list[Requirement]) -> list[Requirement]:
         for e in r.evidence:
             evidence.setdefault(e.observation, e)
         out[r.id] = first.model_copy(update={
-            "evidence": list(evidence.values()), "merged_from": first.merged_from + [r.statement],
+            "evidence": list(evidence.values()),
+            "scenarios": _distinct_scenarios([*first.scenarios, *r.scenarios]), "merged_from": first.merged_from + [r.statement],
             "scope": "cross_file" if len({e.path for e in evidence.values()}) > 1 else "local"})
     return list(out.values())
 

@@ -72,6 +72,9 @@ def to_markdown(result: ExtractionResult, include_technical: bool = False) -> st
             cites = ", ".join(f"`{e.path}:{e.lines[0]}-{e.lines[1]}`" for e in requirement.evidence[:6])
             more = f" and {len(requirement.evidence) - 6} more" if len(requirement.evidence) > 6 else ""
             out.append(f"    - Evidence: {cites}{more}")
+            for scenario in requirement.scenarios:
+                out += [f"    - Scenario: {scenario.name}", f"        - Given: {scenario.given}",
+                        f"        - When: {scenario.when}", f"        - Then: {scenario.then}"]
         for question in result.diagnostics.open_questions.get(capability.id, []):
             out.append(f"- Open question: {question}")
         out.append("")

@@ -9,11 +9,11 @@ from typing import Annotated, Optional
 import typer
 
 from reqx.host.composition import (CAPABILITIES_FILE, Config, default_previous, extract, load_result, orient,
-                                   review_requirement, status)
+                                   review_requirement, status, write_tree)
 from reqx.kernel.llm import LLMError
 from reqx.modules.capabilities.facade import CapabilitiesFileError
 from reqx.modules.discovery.facade import DiscoveryFacade
-from reqx.modules.report.facade import ExtractionResult, to_markdown
+from reqx.modules.report.facade import ExtractionResult, RenderOutput, formats, render
 from reqx.modules.staleness.facade import summary
 from reqx.modules.review.facade import UnknownRequirement
 
@@ -32,6 +32,7 @@ NoCache = Annotated[bool, typer.Option(help="Do not read or write the cache.")]
 Replay = Annotated[bool, typer.Option(help="Serve every call from the cache; fail on a miss.")]
 CapabilitiesOpt = Annotated[Optional[Path], typer.Option(
     "--capabilities", help=f"The capabilities file. Default: {CAPABILITIES_FILE} under PATH.")]
+MULTI_FILE = ("openspec",)   # formats that write a directory tree; `-o` is then required
 ERRORS = (LLMError, OSError, ValueError)   # CapabilitiesFileError and a bad result file are ValueErrors
 
 
@@ -47,6 +48,22 @@ def _emit(text: str, output: Optional[Path]) -> None:
         typer.echo(text)
 
 
+def _check_format(fmt: str, output: Optional[Path]) -> None:
+    """Refuse an unknown format, or a multi-file format without a directory, before any work."""
+    if fmt not in formats():
+        raise typer.BadParameter(f"unknown format {fmt!r}; known formats: {', '.join(formats())}", param_hint="--format")
+    if fmt in MULTI_FILE and output is None:
+        raise typer.BadParameter(f"--format {fmt} writes several files; -o DIRECTORY is required", param_hint="-o")
+
+
+def _emit_output(rendered: RenderOutput, output: Optional[Path]) -> None:
+    if rendered.is_tree:
+        paths = write_tree(rendered.files, output)  # type: ignore[arg-type]
+        _say(f"written: {len(paths)} files under {output}")
+    else:
+        _emit(rendered.text or "", output)
+
+
 @app.command("extract")
 def extract_command(
     path: Path = typer.Argument(..., help="The repository or directory to read."),
@@ -54,7 +71,7 @@ def extract_command(
     exclude: Exclude = [],
     no_default_excludes: NoDefaultExcludes = False,
     output: Optional[Path] = typer.Option(None, "-o", "--output", help="Write the result here instead of stdout."),
-    fmt: str = typer.Option("json", "--format", help="json or md."),
+    fmt: str = typer.Option("json", "--format", help="Output format: json, md, csv or openspec."),
     provider: ProviderOpt = "claude-code",
     model: Optional[str] = typer.Option(None, help="Model for synthesis and the support check."),
     fast_model: FastModel = None,
@@ -72,10 +89,12 @@ def extract_command(
                                   "the previous result."),
     previous: Optional[Path] = typer.Option(None, "--previous", help="An earlier JSON result whose ids to carry forward. "
                                             "Default: the -o file, if it already exists."),
+    include_hidden: bool = typer.Option(False, "--include-hidden", help="csv: also list requirements rejected in review."),
+    strict: Optional[bool] = typer.Option(None, "--strict/--no-strict", help="openspec: leave out requirements with "
+                                          "no evidenced scenario (default: strict)."),
 ) -> None:
     """Run the pipeline on PATH."""
-    if fmt not in ("json", "md"):
-        raise typer.BadParameter("--format must be json or md")
+    _check_format(fmt, output)
     if dry_run:
         from reqx.host.adapters.filesystem import DiskRepo
         found = DiscoveryFacade(DiskRepo(path)).discover(include, exclude, not no_default_excludes)
@@ -97,7 +116,7 @@ def extract_command(
     except ERRORS as error:
         _say(f"error: {error}")
         raise typer.Exit(2)
-    _emit(result.to_json() if fmt == "json" else to_markdown(result), output)
+    _emit_output(render(result, fmt, include_hidden=include_hidden, strict=strict), output)
     _say(f"{len(result.requirements)} requirements; {result.run.calls} model calls, "
          f"{result.run.cached_calls} from cache; status {result.run.status}")
     if result.run.stopped_after:
@@ -137,12 +156,22 @@ def orient_command(
 @app.command("render")
 def render_command(
     file: Path = typer.Argument(..., help="A JSON result written by `reqx extract`."),
-    output: Optional[Path] = typer.Option(None, "-o", "--output"),
-    technical: bool = typer.Option(False, help="Include technical-level requirements."),
+    output: Optional[Path] = typer.Option(None, "-o", "--output", help="File to write; a directory for openspec."),
+    fmt: str = typer.Option("md", "--format", help="Output format: json, md, csv or openspec."),
+    technical: bool = typer.Option(False, help="Include technical-level requirements (md)."),
+    include_hidden: bool = typer.Option(False, "--include-hidden", help="csv: also list requirements rejected in review."),
+    strict: Optional[bool] = typer.Option(None, "--strict/--no-strict", help="openspec: leave out requirements with "
+                                          "no evidenced scenario (default: strict)."),
 ) -> None:
-    """Turn a saved JSON result into Markdown. No model is called."""
-    result = load_result(file)
-    _emit(to_markdown(result, include_technical=technical), output)
+    """Turn a saved JSON result into another format. No model is called."""
+    _check_format(fmt, output)
+    try:
+        result = load_result(file)
+        rendered = render(result, fmt, include_technical=technical, include_hidden=include_hidden, strict=strict)
+        _emit_output(rendered, output)
+    except (OSError, ValueError) as error:
+        _say(f"error: {error}")
+        raise typer.Exit(2)
 
 
 @app.command("schema")

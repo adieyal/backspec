@@ -5,6 +5,8 @@ a file were found.
 """
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic import BaseModel
@@ -32,3 +34,52 @@ def file_state(observations: int, rejected: int, failed: str | None, nothing_rea
     if rejected:
         return "candidates_rejected", f"{rejected} observation(s) failed the citation check"
     return "no_requirements", nothing_reason or "the model reported nothing for this file"
+
+
+@dataclass(frozen=True)
+class RenderOutput:
+    """What a renderer returns: one text document, or a set of files (relative path -> text)."""
+    text: str | None = None
+    files: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def is_tree(self) -> bool:
+        return self.text is None
+
+
+TITLE_MAX = 60
+_CLAUSE_END = re.compile(r"[,;:]\s|\s[-\u2013\u2014]\s|[.!?]\s")
+_TRAILING = " \t\n.,;:!?-\u2013\u2014"
+_MODAL = re.compile(r"\b(SHALL|MUST)\b")
+_LOWER_MODAL = re.compile(r"\b(shall|must)\b", re.I)
+
+
+def one_line(text: str) -> str:
+    """The text on one line, runs of white space made single spaces."""
+    return " ".join(text.split())
+
+
+def requirement_title(statement: str) -> str:
+    """A short title from a statement: its first clause, cut at a word to at most TITLE_MAX
+    characters, with no trailing punctuation."""
+    text = one_line(statement)
+    match = _CLAUSE_END.search(text)
+    clause = text[:match.start()] if match else text
+    clause = clause.strip(_TRAILING) or text.strip(_TRAILING) or text
+    if len(clause) > TITLE_MAX:
+        cut = clause[:TITLE_MAX + 1]
+        clause = cut[:cut.rfind(" ")] if " " in cut[1:] else cut[:TITLE_MAX]
+        clause = clause.strip(_TRAILING) or clause
+    return clause
+
+
+def with_shall(statement: str) -> str:
+    """The statement rewritten only as far as needed to contain SHALL or MUST. One that has
+    them is unchanged; one with a lower-case shall or must has it upper-cased; any other is
+    wrapped, never reworded."""
+    text = one_line(statement)
+    if _MODAL.search(text):
+        return text
+    if _LOWER_MODAL.search(text):
+        return _LOWER_MODAL.sub(lambda m: m.group(1).upper(), text)
+    return f"The system SHALL ensure: {text}"

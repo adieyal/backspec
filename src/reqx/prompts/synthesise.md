@@ -54,6 +54,21 @@ observations. Each observation is one block:
    observations, usually between 5 and 20 in all, and never more than one for every three
    observations.
 
+## Scenarios
+
+A requirement may carry `scenarios`: concrete cases written as given / when / then. Add one
+only where an observation shows that concrete case. That is usually an observation of kind
+`test_case` (a test with a given input and an expected result), or a documented example.
+
+- Each scenario has a `name`, `given` (the starting state), `when` (the action or input) and
+  `then` (the observable result). All four must be filled in, from what the observations say.
+- Each scenario lists the ids of the observations that show it, copied exactly, in the same
+  way as a requirement. A scenario that cites no real observation is discarded, and so is one
+  with a part left empty.
+- Never invent a scenario to fill the field, and never turn a rule into an example that no
+  observation shows. Most requirements will have no scenarios, and that is correct: leave
+  `scenarios` empty or leave it out.
+
 ## Output
 
 Reply with a single JSON object, and nothing else, in this shape:
@@ -65,7 +80,16 @@ Reply with a single JSON object, and nothing else, in this shape:
       "statement": "The developer can ...",
       "conditions": ["..."],
       "level": "user",
-      "evidence": [{"observation": "OBS-1a2b3c", "role": "establishes"}]
+      "evidence": [{"observation": "OBS-1a2b3c", "role": "establishes"}],
+      "scenarios": [
+        {
+          "name": "A short name for the case",
+          "given": "...",
+          "when": "...",
+          "then": "...",
+          "evidence": [{"observation": "OBS-4d5e6f", "role": "establishes"}]
+        }
+      ]
     }
   ],
   "open_questions": ["..."]

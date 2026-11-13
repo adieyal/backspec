@@ -10,7 +10,7 @@ from reqx.kernel.text import short_hash
 from reqx.modules.capabilities.facade import Capability
 from reqx.modules.evidence.facade import Observation
 from reqx.modules.requirements.domain import (AssessReply, ConsolidateReply, Requirement, SynthReply, assess_block,
-                                              build, consolidate_input, merge_requirements, settle, synth_input)
+                                              build_requirement, consolidate_input, merge_requirements, settle, synth_input)
 
 SYNTH_BATCH = 180    # observations per synthesis call
 CONSOLIDATE_MIN = 8  # a capability with more requirements than max(this, a third of its observations) is consolidated
@@ -30,6 +30,7 @@ class Synthesis:
     open_questions: dict[str, list[str]] = field(default_factory=dict)
     failed: dict[str, str] = field(default_factory=dict)   # capability -> why
     unconsolidated: dict[str, str] = field(default_factory=dict)   # capability -> why the merge pass failed
+    dropped_scenarios: int = 0   # scenarios left out: a part missing, or no real observation cited
 
 
 def synthesise(capabilities: list[Capability], by_capability: dict[str, list[Observation]],
@@ -60,7 +61,8 @@ def synthesise(capabilities: list[Capability], by_capability: dict[str, list[Obs
             continue
         known = {o.id: o for o in observations}
         for raw in reply.requirements:
-            requirement = build(raw, capability.id, known)
+            requirement, dropped = build_requirement(raw, capability.id, known)
+            result.dropped_scenarios += dropped
             if requirement and requirement.id not in seen:
                 seen.add(requirement.id)
                 result.requirements.append(requirement)

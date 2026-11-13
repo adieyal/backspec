@@ -4,10 +4,10 @@ from __future__ import annotations
 from reqx.kernel.llm import LLMPort
 from reqx.modules.capabilities.facade import Capability
 from reqx.modules.evidence.facade import Observation
-from reqx.modules.requirements.domain import Evidence, Requirement
+from reqx.modules.requirements.domain import Evidence, Requirement, Scenario
 from reqx.modules.requirements.use_cases import Synthesis, assess, fingerprint, synthesise
 
-__all__ = ["Evidence", "Requirement", "RequirementsFacade", "Synthesis"]
+__all__ = ["Evidence", "Requirement", "RequirementsFacade", "Scenario", "Synthesis"]
 
 
 class RequirementsFacade:

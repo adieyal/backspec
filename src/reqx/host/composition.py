@@ -155,3 +155,19 @@ def review_requirement(file: Path, requirement_id: str, *, confirm: bool = False
         statement=statement, conditions=(conditions or []) if statement is not None else None,
         reviewer=reviewer, date=datetime.date.today().isoformat(), note=note)
     return f"{requirement_id}: {decision} by {reviewer} written to {path}"
+
+
+def write_tree(files: dict[str, str], directory: Path) -> list[Path]:
+    """Write a rendered set of files (relative path -> text) under `directory`. A path that
+    would leave the directory is refused before anything is written."""
+    root = Path(directory).resolve()
+    targets = {}
+    for name, text in files.items():
+        target = (root / name).resolve()
+        if root != target and root not in target.parents:
+            raise ValueError(f"refusing to write outside {directory}: {name}")
+        targets[target] = text
+    for target, text in targets.items():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    return list(targets)

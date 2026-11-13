@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from importlib import resources
 
-PROMPT_VERSION = "2026-11-c"
+PROMPT_VERSION = "2026-11-d"
 
 
 def load(name: str) -> str:

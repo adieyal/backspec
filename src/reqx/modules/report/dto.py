@@ -41,6 +41,7 @@ class Diagnostics(BaseModel):
     rejected: list[Rejected] = Field(default_factory=list)
     failed_capabilities: dict[str, str] = Field(default_factory=dict)
     unconsolidated: dict[str, str] = Field(default_factory=dict)   # capability -> why its merge pass failed
+    dropped_scenarios: int = 0   # scenarios the model wrote that were left out (incomplete or uncited)
     open_questions: dict[str, list[str]] = Field(default_factory=dict)
     review: ReviewSummary | None = None   # set when ids were carried forward or a review file applied
 

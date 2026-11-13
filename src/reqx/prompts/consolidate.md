@@ -29,7 +29,8 @@ unchanged.
 - `merge`: the ids of the requirements this one replaces, copied exactly. At least two. A
   requirement id may appear in only one group. Do not invent ids.
 
-You do not write citations. The program takes the evidence of the merged requirements.
+You do not write citations or scenarios. The program takes the evidence and the scenarios of the
+merged requirements.
 
 ## Output
 
