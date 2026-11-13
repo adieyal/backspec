@@ -32,10 +32,16 @@ def load(store: CapabilitiesStorePort) -> list[Capability] | None:
 
 
 def assign(observations: list[Observation], capabilities: list[Capability], llm: LLMPort,
-           workers: int = 4) -> dict[str, str]:
+           workers: int = 4, earlier: dict[str, str] | None = None) -> dict[str, str]:
     """Observation id -> capability id. An observation the model skipped, or sent to a capability
-    that does not exist, is `unassigned`: it is still reported, never dropped."""
+    that does not exist, is `unassigned`: it is still reported, never dropped.
+
+    An observation an earlier run placed in a capability that still exists stays there; only
+    the others are put to the model."""
     known = {c.id for c in capabilities}
+    kept = {o.id: earlier[o.id] for o in observations
+            if earlier and earlier.get(o.id) in known and earlier[o.id] != UNASSIGNED}
+    everything, observations = observations, [o for o in observations if o.id not in kept]
     described = "\n".join(f"- {c.id}: {c.name}. {c.summary} Includes: {'; '.join(c.includes)}" for c in capabilities)
     items = _items(observations)
     chunks = [items[start:start + ASSIGN_CHUNK] for start in range(0, len(items), ASSIGN_CHUNK)]
@@ -53,4 +59,5 @@ def assign(observations: list[Observation], capabilities: list[Capability], llm:
     placed: dict[str, str] = {}
     for reply in replies:
         placed.update(reply)
-    return {o.id: placed[o.id] if placed.get(o.id) in known else UNASSIGNED for o in observations}
+    placed.update(kept)
+    return {o.id: placed[o.id] if placed.get(o.id) in known else UNASSIGNED for o in everything}

@@ -22,9 +22,11 @@ class Run(BaseModel):
     root: str
     calls: int = 0
     cached_calls: int = 0
-    capabilities_source: Literal["file", "oriented"] = "oriented"
+    capabilities_source: Literal["file", "oriented", "previous"] = "oriented"
     observe_fingerprint: str = ""   # how files were observed; a later run reuses observations only if it matches
     reused_files: int = 0           # files unchanged since the previous result, not read again
+    synthesis_fingerprint: str = ""  # how requirements were written and judged
+    reused_capabilities: list[str] = Field(default_factory=list)   # evidence unchanged, requirements kept
     stopped_after: Literal["capabilities"] | None = None   # set when a gated run stopped early
 
 
@@ -47,6 +49,7 @@ class ExtractionResult(BaseModel):
     run: Run
     capabilities: list[Capability]
     requirements: list[Requirement]
+    hidden: list[Requirement] = Field(default_factory=list)   # rejected in review: kept here, left out of the catalogue
     observations: list[Observation]
     assignments: dict[str, str] = Field(default_factory=dict)   # observation id -> capability id
     coverage: Coverage

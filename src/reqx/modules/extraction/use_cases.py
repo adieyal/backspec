@@ -12,8 +12,8 @@ from typing import Callable
 from reqx.kernel.prompts import PROMPT_VERSION
 from reqx.modules.capabilities.facade import PLUMBING, UNASSIGNED, CapabilitiesFacade, Capability
 from reqx.modules.discovery.facade import DiscoveryFacade
-from reqx.modules.evidence.facade import Earlier, EvidenceFacade
-from reqx.modules.report.facade import Diagnostics, ExtractionResult, Run, build_coverage
+from reqx.modules.evidence.facade import EvidenceFacade
+from reqx.modules.report.facade import Diagnostics, ExtractionResult, Run, build_coverage, earlier_evidence
 from reqx.modules.requirements.facade import Requirement, RequirementsFacade
 from reqx.modules.review.facade import ReviewFacade, ReviewSummary
 
@@ -33,23 +33,32 @@ class Settings:
 def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade, evidence: EvidenceFacade,
         capabilities: CapabilitiesFacade, requirements: RequirementsFacade,
         usage: Callable[[], tuple[int, int]] = lambda: (0, 0), progress: Progress = lambda _: None,
-        review: ReviewFacade | None = None, previous: list[Requirement] | None = None,
-        earlier: dict[str, Earlier] | None = None) -> ExtractionResult:
+        review: ReviewFacade | None = None, before: ExtractionResult | None = None,
+        reuse: bool = True) -> ExtractionResult:
+    """`before` is the previous result, if there is one. Requirement ids are carried forward from
+    it, and with `reuse` so is everything whose inputs have not changed: observations of unchanged
+    files, the capabilities, where each observation was placed, and the requirements of any
+    capability whose observations are the same. A model is asked only about what is new."""
     # An unusable capabilities file is refused before any file is read or model called.
     from_file = capabilities.load()
+    kept = before if reuse else None
     found = discovery.discover(settings.include, settings.exclude, settings.default_excludes)
     progress(f"discovered {len(found.files)} files to read, {len(found.left)} left out")
 
+    earlier = earlier_evidence(kept, evidence.fingerprint()) if kept else None
     observed = evidence.observe(list(found.files), earlier)
     progress(f"observed {len(observed.observations)} verified, {len(observed.rejected)} rejected, "
              f"in {observed.batches} batches; {observed.reused_files} unchanged files reused")
 
     caps: list[Capability] = []
     assignments: dict[str, str] = {}
-    source = "file" if from_file is not None else "oriented"
+    source = "oriented"
     if from_file is not None:
-        caps = from_file
+        caps, source = from_file, "file"
         progress(f"using {len(caps)} capabilities from {capabilities.location}")
+    elif kept and any(c.id not in (PLUMBING, UNASSIGNED) for c in kept.capabilities):
+        caps, source = [c for c in kept.capabilities if c.id != UNASSIGNED], "previous"
+        progress(f"using {len(caps)} capabilities from the previous result")
     elif observed.observations:
         caps = capabilities.orient(observed.observations)
         progress(f"oriented into {len(caps)} capabilities")
@@ -57,22 +66,24 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
             capabilities.save(caps)
             progress(f"capabilities written to {capabilities.location}")
 
+    def describe(status: str, **more: object) -> Run:
+        calls, cached = usage()
+        return Run(status=status, tool_version=TOOL_VERSION, prompt_version=PROMPT_VERSION, provider=provider,
+                   root=root, calls=calls, cached_calls=cached, capabilities_source=source,
+                   observe_fingerprint=evidence.fingerprint(), reused_files=observed.reused_files,
+                   synthesis_fingerprint=requirements.fingerprint(), **more)
+
+    all_observations = sorted(observed.observations, key=lambda o: (o.path, o.lines[0], o.id))
     if settings.gate:
         # Stopped on purpose: the run is `partial` and says where it stopped.
         progress("gate: stopping before assignment and synthesis; edit the file, then run again")
-        calls, cached = usage()
         return ExtractionResult(
-            run=Run(status="partial", tool_version=TOOL_VERSION, prompt_version=PROMPT_VERSION, provider=provider,
-                    root=root, calls=calls, cached_calls=cached, capabilities_source=source,
-                    observe_fingerprint=evidence.fingerprint(), reused_files=observed.reused_files,
-                    stopped_after="capabilities"),
-            capabilities=caps, requirements=[],
-            observations=sorted(observed.observations, key=lambda o: (o.path, o.lines[0], o.id)),
-            assignments={}, coverage=build_coverage(found, observed, [], {}),
+            run=describe("partial", stopped_after="capabilities"), capabilities=caps, requirements=[],
+            observations=all_observations, assignments={}, coverage=build_coverage(found, observed, [], {}),
             diagnostics=Diagnostics(rejected=observed.rejected))
 
     if observed.observations:
-        assignments = capabilities.assign(observed.observations, caps)
+        assignments = capabilities.assign(observed.observations, caps, kept.assignments if kept else None)
         if UNASSIGNED in assignments.values():
             caps.append(Capability(id=UNASSIGNED, name="Unassigned",
                                    summary="Observations that were not placed in a capability."))
@@ -81,35 +92,58 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
     for observation in observed.observations:
         by_capability[assignments[observation.id]].append(observation)
     product = [c for c in caps if c.id != PLUMBING]
-    synthesis = requirements.synthesise(product, by_capability)
-    progress(f"synthesised {len(synthesis.requirements)} requirements")
 
-    final = synthesis.requirements
-    if settings.assess_support and final:
-        final = requirements.assess(final, {f.path: f.lines for f in found.files})
-        counts = collections.Counter(r.support for r in final)
-        progress("assessed support: " + ", ".join(f"{n} {s}" for s, n in sorted(counts.items())))
+    # A capability whose observations are exactly those the previous result had keeps its requirements.
+    reused: list[Requirement] = []
+    reused_capabilities: list[str] = []
+    open_questions: dict[str, list[str]] = {}
+    if kept and kept.run.stopped_after is None and kept.run.synthesis_fingerprint == requirements.fingerprint():
+        placed_before = collections.defaultdict(set)
+        for observation_id, capability_id in kept.assignments.items():
+            placed_before[capability_id].add(observation_id)
+        made_before = collections.defaultdict(list)
+        for requirement in [*kept.requirements, *kept.hidden]:
+            made_before[requirement.capability].append(requirement)
+        unsettled = {*kept.diagnostics.failed_capabilities, *kept.diagnostics.unconsolidated}
+        for capability in product:
+            now = {o.id for o in by_capability.get(capability.id, [])}
+            if now and now == placed_before.get(capability.id) and capability.id not in unsettled:
+                reused_capabilities.append(capability.id)
+                # review is applied afresh below, so a decision withdrawn since then is withdrawn here too
+                reused += [r.model_copy(update={"review": "unreviewed"}) for r in made_before[capability.id]]
+                if capability.id in kept.diagnostics.open_questions:
+                    open_questions[capability.id] = kept.diagnostics.open_questions[capability.id]
+    synthesis = requirements.synthesise([c for c in product if c.id not in reused_capabilities], by_capability)
+    open_questions.update(synthesis.open_questions)
+    progress(f"synthesised {len(synthesis.requirements)} requirements; "
+             f"{len(reused)} kept from {len(reused_capabilities)} unchanged capabilities")
+
+    final = [*reused, *synthesis.requirements]
+    if settings.assess_support:
+        unjudged = [r for r in final if r.support == "not_assessed"]
+        if unjudged:
+            judged = {r.id: r for r in requirements.assess(unjudged, {f.path: f.lines for f in found.files})}
+            final = [judged.get(r.id, r) for r in final]
+            counts = collections.Counter(r.support for r in final)
+            progress("assessed support: " + ", ".join(f"{n} {s}" for s, n in sorted(counts.items())))
     review_summary: ReviewSummary | None = None
+    hidden: list[Requirement] = []
+    previous = [*before.requirements, *before.hidden] if before else None
     if review is not None and review.applies(previous):
         reviewed = review.apply(final, previous)
-        final, review_summary = reviewed.requirements, reviewed.summary
+        final, review_summary, hidden = reviewed.requirements, reviewed.summary, reviewed.hidden
         progress(f"review: {review_summary.carried} ids carried, {review_summary.rejected_hidden} rejected hidden, "
                  f"{review_summary.needs_review} need review, {len(review_summary.stale_entries)} stale entries")
     final = sorted(final, key=lambda r: (r.capability, r.id))
 
-    calls, cached = usage()
     complete = not observed.failed and not synthesis.failed
     return ExtractionResult(
-        run=Run(status="complete" if complete else "partial", tool_version=TOOL_VERSION,
-                prompt_version=PROMPT_VERSION, provider=provider, root=root, calls=calls, cached_calls=cached,
-                capabilities_source=source, observe_fingerprint=evidence.fingerprint(),
-                reused_files=observed.reused_files),
-        capabilities=caps, requirements=final,
-        observations=sorted(observed.observations, key=lambda o: (o.path, o.lines[0], o.id)),
-        assignments=assignments,
-        coverage=build_coverage(found, observed, final, assignments),
-        diagnostics=Diagnostics(rejected=observed.rejected, failed_capabilities=synthesis.failed, unconsolidated=synthesis.unconsolidated,
-                                open_questions=synthesis.open_questions,
+        run=describe("complete" if complete else "partial", reused_capabilities=sorted(reused_capabilities)),
+        capabilities=caps, requirements=final, hidden=sorted(hidden, key=lambda r: (r.capability, r.id)),
+        observations=all_observations, assignments=assignments,
+        coverage=build_coverage(found, observed, [*final, *hidden], assignments),
+        diagnostics=Diagnostics(rejected=observed.rejected, failed_capabilities=synthesis.failed,
+                                unconsolidated=synthesis.unconsolidated, open_questions=open_questions,
                                 review=review_summary))
 
 

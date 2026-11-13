@@ -83,10 +83,20 @@ The default model backend is the Claude Code CLI, using the login you already ha
 installed. To use anything else, pass an object with a `complete(request) -> str` method as
 `Config(provider=...)`.
 
-A model does not describe the same file the same way twice. So when a previous result is
-available (`--previous FILE`, or the `-o` file if it already exists), a file that has not changed
-keeps the observations that result made of it and is not read again. Only new and changed files
-go to the model. `--no-reuse` reads everything again.
+A model does not describe the same file the same way twice, so reqx asks it only about what
+is new. When a previous result is available (`--previous FILE`, or the `-o` file if it already
+exists):
+
+- a file that has not changed keeps the observations that result made of it and is not read again;
+- the capabilities are the previous ones, unless there is a capabilities file;
+- an observation already placed in a capability stays there;
+- a capability whose observations are all the same keeps its requirements and their support verdicts.
+
+A run with nothing changed calls no model and returns the same requirements. A change to one
+file re-reads that file and rewrites only the capabilities it feeds. Anything made with a
+different prompt is not reused, and `--no-reuse` starts from nothing.
+
+A requirement rejected in review is left out of `requirements` and kept under `hidden`.
 
 ## How it works
 

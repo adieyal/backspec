@@ -117,7 +117,8 @@ def test_a_new_requirement_cannot_steal_an_id_that_another_carries():
 
 def test_a_second_run_with_a_reworded_statement_keeps_the_id_from_the_first(tmp_path):
     root, first, saved = first_run(tmp_path)
-    second = run(root, "Managers may correct stock levels.", previous=saved)
+    # reuse off, so the capability is written again and comes back reworded
+    second = run(root, "Managers may correct stock levels.", previous=saved, reuse=False)
     assert second.requirements[0].statement == "Managers may correct stock levels."
     assert second.requirements[0].id == first.requirements[0].id
     assert second.diagnostics.review.carried == 1 and second.diagnostics.review.new == 0

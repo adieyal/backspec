@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from reqx.kernel import prompts
 from reqx.kernel.llm import LLMError, LLMPort, LLMRequest, ask
+from reqx.kernel.text import short_hash
 from reqx.modules.capabilities.facade import Capability
 from reqx.modules.evidence.facade import Observation
 from reqx.modules.requirements.domain import (AssessReply, ConsolidateReply, Requirement, SynthReply, assess_block,
@@ -14,6 +15,13 @@ from reqx.modules.requirements.domain import (AssessReply, ConsolidateReply, Req
 SYNTH_BATCH = 180    # observations per synthesis call
 CONSOLIDATE_MIN = 8  # a capability with more requirements than max(this, a third of its observations) is consolidated
 ASSESS_BATCH = 12    # requirements per support call
+
+
+def fingerprint() -> str:
+    """Changes whenever the way requirements are written, merged or judged does. Requirements an
+    earlier run made another way are not reused."""
+    return short_hash(prompts.load("synthesise"), prompts.load("consolidate"), prompts.load("assess"),
+                      SYNTH_BATCH, CONSOLIDATE_MIN, ASSESS_BATCH)
 
 
 @dataclass
