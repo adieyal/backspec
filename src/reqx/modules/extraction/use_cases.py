@@ -26,11 +26,14 @@ class Settings:
     exclude: list[str] = field(default_factory=list)
     default_excludes: bool = True
     assess_support: bool = True
+    gate: bool = False   # stop once the capabilities are settled, before assignment and synthesis
 
 
 def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade, evidence: EvidenceFacade,
         capabilities: CapabilitiesFacade, requirements: RequirementsFacade,
         usage: Callable[[], tuple[int, int]] = lambda: (0, 0), progress: Progress = lambda _: None) -> ExtractionResult:
+    # An unusable capabilities file is refused before any file is read or model called.
+    from_file = capabilities.load()
     found = discovery.discover(settings.include, settings.exclude, settings.default_excludes)
     progress(f"discovered {len(found.files)} files to read, {len(found.left)} left out")
 
@@ -40,13 +43,35 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
 
     caps: list[Capability] = []
     assignments: dict[str, str] = {}
-    if observed.observations:
+    source = "file" if from_file is not None else "oriented"
+    if from_file is not None:
+        caps = from_file
+        progress(f"using {len(caps)} capabilities from {capabilities.location}")
+    elif observed.observations:
         caps = capabilities.orient(observed.observations)
+        progress(f"oriented into {len(caps)} capabilities")
+        if settings.gate:
+            capabilities.save(caps)
+            progress(f"capabilities written to {capabilities.location}")
+
+    if settings.gate:
+        # Stopped on purpose: the run is `partial` and says where it stopped.
+        progress("gate: stopping before assignment and synthesis; edit the file, then run again")
+        calls, cached = usage()
+        return ExtractionResult(
+            run=Run(status="partial", tool_version=TOOL_VERSION, prompt_version=PROMPT_VERSION, provider=provider,
+                    root=root, calls=calls, cached_calls=cached, capabilities_source=source,
+                    stopped_after="capabilities"),
+            capabilities=caps, requirements=[],
+            observations=sorted(observed.observations, key=lambda o: (o.path, o.lines[0], o.id)),
+            assignments={}, coverage=build_coverage(found, observed, [], {}),
+            diagnostics=Diagnostics(rejected=observed.rejected))
+
+    if observed.observations:
         assignments = capabilities.assign(observed.observations, caps)
         if UNASSIGNED in assignments.values():
             caps.append(Capability(id=UNASSIGNED, name="Unassigned",
                                    summary="Observations that were not placed in a capability."))
-        progress(f"oriented into {len(caps)} capabilities")
 
     by_capability = collections.defaultdict(list)
     for observation in observed.observations:
@@ -66,10 +91,30 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
     complete = not observed.failed and not synthesis.failed
     return ExtractionResult(
         run=Run(status="complete" if complete else "partial", tool_version=TOOL_VERSION,
-                prompt_version=PROMPT_VERSION, provider=provider, root=root, calls=calls, cached_calls=cached),
+                prompt_version=PROMPT_VERSION, provider=provider, root=root, calls=calls, cached_calls=cached,
+                capabilities_source=source),
         capabilities=caps, requirements=final,
         observations=sorted(observed.observations, key=lambda o: (o.path, o.lines[0], o.id)),
         assignments=assignments,
         coverage=build_coverage(found, observed, final, assignments),
         diagnostics=Diagnostics(rejected=observed.rejected, failed_capabilities=synthesis.failed,
                                 open_questions=synthesis.open_questions))
+
+
+def orient_only(settings: Settings, discovery: DiscoveryFacade, evidence: EvidenceFacade,
+                capabilities: CapabilitiesFacade, force: bool = False,
+                progress: Progress = lambda _: None) -> list[Capability]:
+    """Discover, observe, orient and write the capabilities file; nothing after that.
+    Refuses to replace an existing file unless `force`, before any model is called."""
+    if capabilities.exists() and not force:
+        raise FileExistsError(f"{capabilities.location} already exists; pass --force to replace it")
+    found = discovery.discover(settings.include, settings.exclude, settings.default_excludes)
+    progress(f"discovered {len(found.files)} files to read, {len(found.left)} left out")
+    observed = evidence.observe(list(found.files))
+    progress(f"observed {len(observed.observations)} verified, {len(observed.rejected)} rejected")
+    if not observed.observations:
+        raise ValueError("no observations were verified, so there is nothing to orient from; no file was written")
+    caps = capabilities.orient(observed.observations)
+    capabilities.save(caps)
+    progress(f"capabilities written to {capabilities.location}")
+    return caps
