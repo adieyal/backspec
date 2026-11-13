@@ -153,3 +153,14 @@ def test_the_result_round_trips_through_json_and_renders(tmp_path):
 def test_dry_run_lists_files_and_calls_no_model(tmp_path):
     done = CliRunner().invoke(app, ["extract", str(repo(tmp_path)), "--dry-run", "--provider", "none"])
     assert done.exit_code == 0 and "read      src/policy.py" in done.output and "excluded  logo.png" in done.output
+
+
+def test_changing_one_stages_prompt_leaves_the_other_stages_cached(tmp_path, monkeypatch):
+    (tmp_path / "repo").mkdir()
+    root, cache = repo(tmp_path / "repo"), tmp_path / "cache"
+    extract(root, Config(provider=fake(), cache_dir=cache))
+    from reqx.kernel import prompts
+    real = prompts.load
+    monkeypatch.setattr(prompts, "load", lambda name: real(name) + ("\nBe brief." if name == "synthesise" else ""))
+    second = extract(root, Config(provider=fake(), cache_dir=cache))
+    assert second.run.calls == 1 and second.run.cached_calls == 4

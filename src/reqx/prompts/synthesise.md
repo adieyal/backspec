@@ -39,11 +39,20 @@ observations. Each observation is one block:
    rule the product enforces behind the scenes, `technical` for internal mechanics.
 6. If the observations suggest a behaviour but leave a gap you would have to guess at, do not
    guess. Add a line to `open_questions`.
-7. Consolidate hard. Many observations are the same behaviour seen from the server, the front
-   end and a test: that is one requirement with several pieces of evidence, not several
-   requirements. It is fine to leave trivia unused. Aim for the set of requirements a product
-   owner would recognise as "what this capability does": usually between 8 and 25, and never
-   more than one for every three observations.
+7. Consolidate hard. Write the fewest requirements that still cover what the capability does.
+   One requirement is one rule with all its conditions, citing every observation that shows it.
+   This is too fine, and you must not do it:
+   - one requirement per message string, status message or reason string: write the rule that
+     produces them once, and list the cases in `conditions`;
+   - one requirement per enum value, status or option: that is one rule with several cases;
+   - one requirement per file that shows the same behaviour: the server, the front end, the
+     report and the test are one requirement with several pieces of evidence;
+   - a requirement that only restates another from its test, or only adds a detail of wording.
+   The right grain is what a product owner would list as "what this capability does". Before
+   you answer, read your list again and merge any two that a reviewer would test together.
+   It is fine to leave trivia unused. Aim for roughly one requirement for every five to ten
+   observations, usually between 5 and 20 in all, and never more than one for every three
+   observations.
 
 ## Output
 
