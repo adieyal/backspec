@@ -46,6 +46,7 @@ class Requirement(BaseModel):
     support: Support = "not_assessed"
     support_note: str = ""
     evidence: list[Evidence]
+    merged_from: list[str] = Field(default_factory=list)   # statements merged into this one
 
 
 class CitedObservation(BaseModel):
@@ -63,6 +64,17 @@ class RawRequirement(BaseModel):
 class SynthReply(BaseModel):
     requirements: list[RawRequirement] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
+
+
+class MergeGroup(BaseModel):
+    statement: str
+    conditions: list[str] = Field(default_factory=list)
+    level: str = "user"
+    merge: list[str] = Field(default_factory=list)
+
+
+class ConsolidateReply(BaseModel):
+    groups: list[MergeGroup] = Field(default_factory=list)
 
 
 class Verdict(BaseModel):
@@ -100,6 +112,72 @@ def build(raw: RawRequirement, capability: str, known: dict[str, Observed]) -> R
         id="REQ-" + short_hash(capability, raw.statement), capability=capability,
         statement=raw.statement.strip(), conditions=raw.conditions, level=level,  # type: ignore[arg-type]
         scope="cross_file" if len({e.path for e in evidence}) > 1 else "local", evidence=evidence)
+
+
+def consolidate_input(requirements: list[Requirement]) -> str:
+    out: list[str] = []
+    for r in requirements:
+        out += [f"{r.id} | {r.level}", f"  statement: {r.statement}"]
+        if r.conditions:
+            out.append("  conditions: " + " ; ".join(r.conditions))
+        out += ["  observations: " + ", ".join(e.observation for e in r.evidence), ""]
+    return "\n".join(out)
+
+
+def merge_requirements(requirements: list[Requirement], groups: list[MergeGroup]) -> list[Requirement]:
+    """The requirements with each model-proposed group merged into one. The program builds the
+    merged requirement: evidence is the union (by observation id, order kept) and scope is
+    recomputed. An unmentioned requirement is kept as it is. An unknown id is ignored, a
+    requirement named in two groups goes to the first, and a group left with fewer than two
+    known requirements merges nothing."""
+    by_id = {r.id: r for r in requirements}
+    claimed: set[str] = set()
+    merged_at: dict[str, Requirement] = {}     # id of the first merged requirement -> the merged one
+    absorbed: set[str] = set()
+    for group in groups:
+        ids = [i for i in dict.fromkeys(group.merge) if i in by_id and i not in claimed]
+        if len(ids) < 2 or not group.statement.strip():
+            continue
+        claimed.update(ids)
+        sources = [by_id[i] for i in ids]
+        evidence: dict[str, Evidence] = {}
+        for source in sources:
+            for e in source.evidence:
+                evidence.setdefault(e.observation, e)
+        statement = group.statement.strip()
+        level = group.level if group.level in ("user", "system", "technical") else sources[0].level
+        capability = sources[0].capability
+        merged = Requirement(
+            id="REQ-" + short_hash(capability, statement), capability=capability, statement=statement,
+            conditions=group.conditions, level=level,  # type: ignore[arg-type]
+            scope="cross_file" if len({e.path for e in evidence.values()}) > 1 else "local",
+            evidence=list(evidence.values()), merged_from=[s.statement for s in sources])
+        merged_at[ids[0]] = merged
+        absorbed.update(ids[1:])
+    out: list[Requirement] = []
+    for r in requirements:
+        if r.id in absorbed:
+            continue
+        out.append(merged_at.get(r.id, r))
+    return _fold_same_id(out)
+
+
+def _fold_same_id(requirements: list[Requirement]) -> list[Requirement]:
+    """Two requirements with one id (a merged statement equal to another's) become one, with the
+    evidence of both."""
+    out: dict[str, Requirement] = {}
+    for r in requirements:
+        first = out.get(r.id)
+        if first is None:
+            out[r.id] = r
+            continue
+        evidence = {e.observation: e for e in first.evidence}
+        for e in r.evidence:
+            evidence.setdefault(e.observation, e)
+        out[r.id] = first.model_copy(update={
+            "evidence": list(evidence.values()), "merged_from": first.merged_from + [r.statement],
+            "scope": "cross_file" if len({e.path for e in evidence.values()}) > 1 else "local"})
+    return list(out.values())
 
 
 def assess_block(requirement: Requirement, file_lines: dict[str, list[str]]) -> str:
