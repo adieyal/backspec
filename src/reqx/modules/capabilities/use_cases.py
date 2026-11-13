@@ -5,8 +5,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 from reqx.kernel import prompts
 from reqx.kernel.llm import LLMError, LLMPort, LLMRequest, ask
-from reqx.modules.capabilities.domain import (PLUMBING, UNASSIGNED, AssignReply, Capability, OrientReply,
-                                              listing, thin)
+from reqx.modules.capabilities.domain import (UNASSIGNED, AssignReply, Capability, OrientReply, listing,
+                                              parse_capabilities, thin, with_plumbing)
+from reqx.modules.capabilities.ports import CapabilitiesStorePort
 from reqx.modules.evidence.facade import Observation
 
 ORIENT_LIMIT = 2000   # observation lines one orient call is shown
@@ -21,10 +22,13 @@ def _items(observations: list[Observation]) -> list[tuple[str, str, str]]:
 def orient(observations: list[Observation], llm: LLMPort) -> list[Capability]:
     shown = listing(thin(_items(observations), ORIENT_LIMIT))
     reply = ask(llm, LLMRequest("orient", f"{prompts.load('orient')}\n\n# The observations\n\n{shown}", "fast"), OrientReply)
-    capabilities = {c.id: c for c in reply.capabilities}
-    capabilities.setdefault(PLUMBING, Capability(id=PLUMBING, name="Internal mechanics",
-                                                 summary="Machinery no user or operator would notice."))
-    return list(capabilities.values())
+    return with_plumbing(list({c.id: c for c in reply.capabilities}.values()))
+
+
+def load(store: CapabilitiesStorePort) -> list[Capability] | None:
+    """The owner's capability list, validated, or None when there is none. Refuses a bad file."""
+    data = store.read()
+    return None if data is None else parse_capabilities(data, store.location)
 
 
 def assign(observations: list[Observation], capabilities: list[Capability], llm: LLMPort,

@@ -21,6 +21,21 @@ reqx extract ./repo --dry-run
 reqx extract ./repo --include "src/**" --exclude "**/migrations/**" -o reqs.json
 ```
 
+To check the grouping before the expensive stages run, propose the capabilities first. This
+writes `reqx.capabilities.yaml` at the root of the repository, which you can edit.
+`reqx extract` then uses the file and skips the orient call, on this and every later run.
+
+```bash
+reqx orient ./repo          # writes ./repo/reqx.capabilities.yaml; --force replaces it
+reqx extract ./repo         # uses the file; --capabilities PATH picks another
+reqx extract ./repo --gate  # orient if there is no file, write it, and stop
+```
+
+A file that breaks the rules (unique ids of lowercase letters, digits and underscores; a name
+for each) is refused with every problem listed. `plumbing` is added if it is missing. Which
+observation belongs to which capability is not stored; it is redone on each run. A gated run
+returns no requirements, with `run.status` `partial` and `run.stopped_after` `capabilities`.
+
 ```bash
 reqx render reqs.json -o REQUIREMENTS.md
 ```
@@ -31,6 +46,13 @@ from reqx import Config, extract
 result = extract("./repo", Config(include=["src/**"]))
 for requirement in result.requirements:
     print(requirement.id, requirement.support, requirement.statement)
+```
+
+```python
+from reqx import orient
+
+for capability in orient("./repo"):   # writes the capabilities file
+    print(capability.id, capability.name)
 ```
 
 The default model backend is the Claude Code CLI, using the login you already have. It must be
@@ -44,7 +66,7 @@ installed. To use anything else, pass an object with a `complete(request) -> str
 2. **Observe.** Show a model every line, each with its real line number, and collect single
    facts with a line range and a verbatim quote.
 3. **Verify.** Keep an observation only if its quote is really in the file. No model is involved.
-4. **Orient and assign.** Propose capabilities, then place each observation in one. Grouping is
+4. **Orient and assign.** Propose capabilities (or read them from the capabilities file), then place each observation in one. Grouping is
    by observation, not by file.
 5. **Synthesise.** Write requirements per capability. A requirement names observations by id
    and the program copies their locations, so a model never writes a citation at this step.
@@ -85,6 +107,6 @@ python3 -m pytest -q
 
 ## Not built yet
 
-Triage, the editable capabilities file, the review file and durable ids, staleness, the
+Triage, the review file and durable ids, staleness, the
 triage audit, tree-sitter, a Codex adapter, token budgets, and every renderer other than
 Markdown. See the spec.
