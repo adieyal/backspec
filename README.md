@@ -25,6 +25,21 @@ reqx extract ./repo --include "src/**" --exclude "**/migrations/**" -o reqs.json
 reqx render reqs.json -o REQUIREMENTS.md
 ```
 
+Requirement ids last between runs: a run carries them forward from the previous result by how
+much the cited code overlaps, so rewording a statement keeps its id. `-o` names the previous
+result when that file already exists, or give `--previous FILE`. Record a decision, and the next
+run applies it. The entry goes in `reqx.review.yaml` (or `--review PATH`).
+
+```bash
+reqx review reqs.json REQ-1a2b3c4d --confirm --reviewer ana
+reqx review reqs.json REQ-1a2b3c4d --statement "Managers may adjust stock." --condition "Never below zero."
+reqx review reqs.json REQ-1a2b3c4d --reject --note "Not a requirement"
+reqx extract ./repo -o reqs.json
+```
+
+A rejected requirement is hidden and counted in `diagnostics.review`. If the cited code changed
+since the decision, it comes back as `needs_review`. Entries that match nothing are listed as stale.
+
 ```python
 from reqx import Config, extract
 
@@ -85,6 +100,6 @@ python3 -m pytest -q
 
 ## Not built yet
 
-Triage, the editable capabilities file, the review file and durable ids, staleness, the
+Triage, the editable capabilities file, staleness, the
 triage audit, tree-sitter, a Codex adapter, token budgets, and every renderer other than
 Markdown. See the spec.

@@ -2,6 +2,8 @@
 model backend, file system or cache is in use."""
 from __future__ import annotations
 
+import datetime
+import getpass
 import hashlib
 import os
 from dataclasses import dataclass, field
@@ -10,6 +12,7 @@ from pathlib import Path
 from reqx.host.adapters.cache import CachedLLM
 from reqx.host.adapters.claude_code import ClaudeCode
 from reqx.host.adapters.filesystem import DiskRepo
+from reqx.host.adapters.review_yaml import YamlReviewStore
 from reqx.kernel.llm import LLMError, LLMPort
 from reqx.modules.capabilities.facade import CapabilitiesFacade
 from reqx.modules.discovery.facade import DiscoveryFacade
@@ -17,6 +20,9 @@ from reqx.modules.evidence.facade import EvidenceFacade
 from reqx.modules.extraction.facade import Progress, Settings, run
 from reqx.modules.report.facade import ExtractionResult
 from reqx.modules.requirements.facade import RequirementsFacade
+from reqx.modules.review.facade import ReviewFacade
+
+REVIEW_FILE = "reqx.review.yaml"
 
 
 @dataclass
@@ -33,6 +39,8 @@ class Config:
     cache_dir: Path | None = None
     use_cache: bool = True
     replay: bool = False
+    review_file: Path | None = None   # default: reqx.review.yaml under the root, used only if it exists
+    previous: Path | None = None      # a saved JSON result whose ids this run carries forward
 
 
 def default_cache_dir(root: Path) -> Path:
@@ -61,9 +69,50 @@ def extract(path: str | Path, config: Config | None = None, progress: Progress =
     llm = CachedLLM(inner, directory, config.replay)
     settings = Settings(include=config.include, exclude=config.exclude,
                         default_excludes=config.default_excludes, assess_support=config.assess_support)
+    review_path = config.review_file or root / REVIEW_FILE
+    if config.review_file and not review_path.is_file():
+        raise FileNotFoundError(f"review file not found: {review_path}")
+    store = YamlReviewStore(review_path) if review_path.is_file() else None
+    previous = load_result(config.previous).requirements if config.previous else None
     return run(root=root.name, provider=name, settings=settings,
                discovery=DiscoveryFacade(DiskRepo(root)),
                evidence=EvidenceFacade(llm, config.concurrency),
                capabilities=CapabilitiesFacade(llm, config.concurrency),
                requirements=RequirementsFacade(llm, config.concurrency),
-               usage=llm.usage, progress=progress)
+               usage=llm.usage, progress=progress, review=ReviewFacade(store), previous=previous)
+
+
+def load_result(file: Path) -> ExtractionResult:
+    """A saved JSON result."""
+    return ExtractionResult.model_validate_json(Path(file).read_text(encoding="utf-8"))
+
+
+def default_previous(previous: Path | None, output: Path | None, fmt: str = "json") -> Path | None:
+    """The previous result: the one named, else the JSON output file if it already exists."""
+    if previous is not None:
+        return previous
+    return output if output is not None and fmt == "json" and output.is_file() else None
+
+
+def review_requirement(file: Path, requirement_id: str, *, confirm: bool = False, reject: bool = False,
+                       statement: str | None = None, conditions: list[str] | None = None,
+                       reviewer: str | None = None, note: str | None = None,
+                       review_file: Path | None = None) -> str:
+    """Record a decision about one requirement of a saved result, and say what was written.
+    Raises UnknownRequirement for an id the result does not have, ValueError for a bad request."""
+    if confirm + reject + (statement is not None) != 1:
+        raise ValueError("give exactly one of --confirm, --reject or --statement")
+    if conditions and statement is None:
+        raise ValueError("--condition goes with --statement")
+    decision = "confirm" if confirm else "reject" if reject else "edit"
+    path = review_file or Path(REVIEW_FILE)
+    if not reviewer:
+        try:
+            reviewer = getpass.getuser()
+        except Exception:
+            reviewer = "unknown"
+    ReviewFacade(YamlReviewStore(path)).record(
+        load_result(file).requirements, requirement_id, decision,  # type: ignore[arg-type]
+        statement=statement, conditions=(conditions or []) if statement is not None else None,
+        reviewer=reviewer, date=datetime.date.today().isoformat(), note=note)
+    return f"{requirement_id}: {decision} by {reviewer} written to {path}"
