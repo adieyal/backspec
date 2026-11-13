@@ -105,7 +105,7 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         observations=sorted(observed.observations, key=lambda o: (o.path, o.lines[0], o.id)),
         assignments=assignments,
         coverage=build_coverage(found, observed, final, assignments),
-        diagnostics=Diagnostics(rejected=observed.rejected, failed_capabilities=synthesis.failed,
+        diagnostics=Diagnostics(rejected=observed.rejected, failed_capabilities=synthesis.failed, unconsolidated=synthesis.unconsolidated,
                                 open_questions=synthesis.open_questions,
                                 review=review_summary))
 
