@@ -130,7 +130,7 @@ def test_an_edit_away_from_the_cited_lines_changes_no_observation_and_rewrites_n
     (root / "src" / "service.py").write_text(SERVICE + "\n# a new comment\n")
     llm = rewording_llm()
     second = extract(root, Config(provider=llm, use_cache=False, previous=saved(tmp_path, first)))
-    assert stages(llm) == ["observe"]   # the changed lines are read; nothing is written again
+    assert stages(llm) == ["triage", "observe"]   # the changed file is looked at and its changed lines read; nothing is written again
     assert [o.id for o in second.observations] == [o.id for o in first.observations]
     assert second.run.partly_read_files == 1 and second.run.reused_capabilities == ["stock"]
     assert [(r.id, r.statement) for r in second.requirements] == [(r.id, r.statement) for r in first.requirements]

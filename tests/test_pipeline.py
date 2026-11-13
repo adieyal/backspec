@@ -55,8 +55,15 @@ def assess(prompt):
                          for i in re.findall(r"^##### (REQ-\w+)", prompt, re.M)]}
 
 
+def triage(prompt):
+    """Every file is of low relevance, so triage settles and skips nothing."""
+    return {"files": [{"path": path, "role": "other", "relevance": "low", "sure": True}
+                      for path in re.findall(r"^=== FILE: (\S+)", prompt, re.M)]}
+
+
 def fake():
-    return FakeLLM({"observe": observe, "orient": orient, "assign": assign, "synthesise": synthesise, "assess": assess})
+    return FakeLLM({"triage": triage, "observe": observe, "orient": orient, "assign": assign,
+                    "synthesise": synthesise, "assess": assess})
 
 
 def run(tmp_path, llm=None, **changes):
@@ -136,7 +143,7 @@ def test_a_second_run_is_served_from_the_cache_and_replay_fails_on_a_miss(tmp_pa
     root, cache = repo(tmp_path / "repo"), tmp_path / "cache"
     first = extract(root, Config(provider=fake(), cache_dir=cache))
     second = extract(root, Config(provider=fake(), cache_dir=cache, replay=True))
-    assert first.run.calls == 5 and second.run.calls == 0 and second.run.cached_calls == 5
+    assert first.run.calls == 6 and second.run.calls == 0 and second.run.cached_calls == 6
     assert second.requirements == first.requirements
     (root / "src" / "service.py").write_text(SERVICE + "# changed\n")
     assert extract(root, Config(provider=fake(), cache_dir=cache, replay=True)).run.status == "partial"
@@ -163,4 +170,4 @@ def test_changing_one_stages_prompt_leaves_the_other_stages_cached(tmp_path, mon
     real = prompts.load
     monkeypatch.setattr(prompts, "load", lambda name: real(name) + ("\nBe brief." if name == "synthesise" else ""))
     second = extract(root, Config(provider=fake(), cache_dir=cache))
-    assert second.run.calls == 1 and second.run.cached_calls == 4
+    assert second.run.calls == 1 and second.run.cached_calls == 5

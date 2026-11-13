@@ -31,7 +31,7 @@ def fresh_repo(tmp_path):
 
 
 def run(tmp_path, llm, **changes):
-    return extract(fresh_repo(tmp_path), Config(provider=llm, use_cache=False, **changes))
+    return extract(fresh_repo(tmp_path), Config(provider=llm, use_cache=False, **{"triage": False, **changes}))
 
 
 def reservations(tmp_path):
@@ -44,11 +44,11 @@ def reservations(tmp_path):
 def test_totals_add_up_across_stages_and_cached_replies_count_zero(tmp_path):
     (tmp_path / "repo").mkdir()
     root, cache = repo(tmp_path / "repo"), tmp_path / "cache"
-    first = extract(root, Config(provider=reporting(), cache_dir=cache))
+    first = extract(root, Config(provider=reporting(), cache_dir=cache, triage=False))
     assert (first.run.input_tokens, first.run.output_tokens) == (500, 50)
     assert sum(u.input_tokens for u in first.run.usage_by_stage.values()) == 500
     assert sum(u.output_tokens for u in first.run.usage_by_stage.values()) == 50
-    second = extract(root, Config(provider=reporting(), cache_dir=cache))
+    second = extract(root, Config(provider=reporting(), cache_dir=cache, triage=False))
     assert (second.run.calls, second.run.cached_calls) == (0, 5)
     assert (second.run.input_tokens, second.run.output_tokens) == (0, 0)
     assert all(u.calls == 0 and u.cached == 1 and u.input_tokens == 0 for u in second.run.usage_by_stage.values())
@@ -57,7 +57,7 @@ def test_totals_add_up_across_stages_and_cached_replies_count_zero(tmp_path):
     real = prompts.load
     prompts.load = lambda name: real(name) + ("\nBe brief." if name == "synthesise" else "")
     try:
-        third = extract(root, Config(provider=reporting(), cache_dir=cache))
+        third = extract(root, Config(provider=reporting(), cache_dir=cache, triage=False))
     finally:
         prompts.load = real
     assert (third.run.calls, third.run.cached_calls, third.run.input_tokens) == (1, 4, 100)
@@ -131,8 +131,8 @@ def test_a_run_without_a_budget_or_within_one_is_not_budget_stopped(tmp_path):
 def test_a_run_entirely_from_cache_passes_under_a_budget_of_one_token(tmp_path):
     (tmp_path / "repo").mkdir()
     root, cache = repo(tmp_path / "repo"), tmp_path / "cache"
-    extract(root, Config(provider=fake(), cache_dir=cache))
-    again = extract(root, Config(provider=fake(), cache_dir=cache, replay=True, max_tokens=1))
+    extract(root, Config(provider=fake(), cache_dir=cache, triage=False))
+    again = extract(root, Config(provider=fake(), cache_dir=cache, replay=True, max_tokens=1, triage=False))
     assert again.run.status == "complete" and not again.run.budget_reached
     assert again.run.cached_calls == 5 and again.run.input_tokens == 0
 

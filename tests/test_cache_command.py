@@ -27,7 +27,7 @@ def test_info_counts_cached_replies_per_stage_and_their_size(tmp_path):
     for stage in ("assess", "assign", "observe", "orient", "synthesise"):
         assert f"  {stage}: 1\n" in done.output
     size = sum(f.stat().st_size for f in cache.iterdir())
-    assert f"cache directory: {cache}" in done.output and f"5 cached replies, {size} bytes" in done.output
+    assert f"cache directory: {cache}" in done.output and f"6 cached replies, {size} bytes" in done.output
 
 
 def test_info_defaults_to_the_cache_of_the_repository(tmp_path, monkeypatch):
@@ -36,7 +36,7 @@ def test_info_defaults_to_the_cache_of_the_repository(tmp_path, monkeypatch):
     root = repo(tmp_path / "repo")
     extract(root, Config(provider=fake()))
     done = cli("info", str(root))
-    assert f"cache directory: {default_cache_dir(root.resolve())}" in done.output and "5 cached replies" in done.output
+    assert f"cache directory: {default_cache_dir(root.resolve())}" in done.output and "6 cached replies" in done.output
 
 
 def test_info_on_a_missing_cache_reports_zero(tmp_path):
@@ -47,8 +47,8 @@ def test_info_on_a_missing_cache_reports_zero(tmp_path):
 def test_clear_without_yes_deletes_nothing_and_says_what_it_would_delete(tmp_path):
     root, cache = cached_repo(tmp_path)
     done = cli("clear", str(root), "--cache-dir", str(cache))
-    assert done.exit_code == 0 and "would delete 5 cached replies" in done.output and "--yes" in done.output
-    assert len(list(cache.iterdir())) == 5
+    assert done.exit_code == 0 and "would delete 6 cached replies" in done.output and "--yes" in done.output
+    assert len(list(cache.iterdir())) == 6
 
 
 def test_clear_with_yes_deletes_the_cache_files_and_only_those(tmp_path):
@@ -56,7 +56,7 @@ def test_clear_with_yes_deletes_the_cache_files_and_only_those(tmp_path):
     other = tmp_path / "other.json"
     other.write_text("keep")
     done = cli("clear", str(root), "--cache-dir", str(cache), "--yes")
-    assert done.exit_code == 0 and "deleting 5 cached replies" in done.output
+    assert done.exit_code == 0 and "deleting 6 cached replies" in done.output
     assert list(cache.iterdir()) == [] and cache.is_dir() and other.read_text() == "keep" and root.is_dir()
     assert "0 cached replies" in cli("info", str(root), "--cache-dir", str(cache)).output
 

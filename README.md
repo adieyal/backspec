@@ -128,7 +128,8 @@ A model does not describe the same file the same way twice, so reqx asks it only
 is new. When a previous result is available (`--previous FILE`, or the `-o` file if it already
 exists):
 
-- a file that has not changed keeps the observations that result made of it and is not read again;
+- a file that has not changed keeps the observations that result made of it and is not read again,
+  and keeps its triage verdict and is not triaged again;
 - in a file that has changed, only the changed lines are read again, with some context; an
   observation whose cited lines are untouched stays, and its citation moves with the code;
 - the capabilities are the previous ones, unless there is a capabilities file;
@@ -145,19 +146,27 @@ A requirement rejected in review is left out of `requirements` and kept under `h
 
 1. **Discover.** List the files, apply the include and exclude patterns, take one snapshot of
    each file that will be read.
-2. **Observe.** Show a model every line, each with its real line number, and collect single
-   facts with a line range and a verbatim quote.
-3. **Verify.** Keep an observation only if its quote is really in the file. No model is involved.
-4. **Orient and assign.** Propose capabilities (or read them from the capabilities file), then place each observation in one. Grouping is
+2. **Triage.** A fast model looks at each file's path, size and first 40 lines and gives its
+   role, how likely it is to hold behaviour a user would notice, and whether it is sure. The
+   program skips a file only when the relevance is `none` and the model is sure; anything else,
+   including a file the model did not answer for, is read. A skipped file is `triaged_out`, with
+   its role as the reason. A fraction of the skipped files (`--triage-audit`, default 0.1, at
+   least 5 and at most 50) is read anyway, chosen by hash so the choice is the same every run;
+   `coverage.triage_audit` says how many of them held a verified observation, with a 95 percent
+   confidence interval for the miss rate. `--no-triage` reads everything.
+3. **Observe.** Show a model every line of each file to be read, each with its real line number,
+   and collect single facts with a line range and a verbatim quote.
+4. **Verify.** Keep an observation only if its quote is really in the file. No model is involved.
+5. **Orient and assign.** Propose capabilities (or read them from the capabilities file), then place each observation in one. Grouping is
    by observation, not by file.
-5. **Synthesise.** Write requirements per capability. A requirement names observations by id
+6. **Synthesise.** Write requirements per capability. A requirement names observations by id
    and the program copies their locations, so a model never writes a citation at this step.
-6. **Assess support.** A second call judges whether the cited lines establish the statement:
+7. **Assess support.** A second call judges whether the cited lines establish the statement:
    `direct`, `partial`, `insufficient` or `conflicting`.
-7. **Report.** Requirements, observations, a state and reason for every file, and what was
+8. **Report.** Requirements, observations, a state and reason for every file, and what was
    rejected along the way.
 
-Observing, orienting and assigning use a fast model. Synthesis and the support check use a
+Triaging, observing, orienting and assigning use a fast model. Synthesis and the support check use a
 strong one.
 
 ## What it guarantees, and what it does not
@@ -165,8 +174,8 @@ strong one.
 Guaranteed, whatever the model says:
 
 - Every citation in the output resolves to real lines in the file as it was read.
-- Every file under the root is in exactly one state: `excluded`, `skipped`, `extracted`,
-  `no_requirements`, `candidates_rejected` or `failed`.
+- Every file under the root is in exactly one state: `excluded`, `skipped`, `triaged_out`,
+  `extracted`, `no_requirements`, `candidates_rejected` or `failed`.
 - A requirement whose evidence only shows that something exists is never rated above
   `insufficient`.
 - A run in which any stage failed is marked `partial`.
@@ -205,6 +214,4 @@ python3 -m pytest -q
 
 ## Not built yet
 
-Triage, the
-triage audit, and the HTML renderer. The Codex adapter exists but is unverified against the real
-CLI. See the spec.
+The HTML renderer. The Codex adapter exists but is unverified against the real CLI. See the spec.

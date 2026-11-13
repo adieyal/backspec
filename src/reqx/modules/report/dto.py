@@ -37,6 +37,7 @@ class Run(BaseModel):
     syntax_files: int = 0           # files read with symbols from a parser
     text_files: int = 0             # files read as plain text
     synthesis_fingerprint: str = ""  # how requirements were written and judged
+    triage_fingerprint: str = ""    # how files were triaged; a later run reuses verdicts only if it matches
     reused_capabilities: list[str] = Field(default_factory=list)   # evidence unchanged, requirements kept
     stopped_after: Literal["capabilities"] | None = None   # set when a gated run stopped early
     input_tokens: int = 0
@@ -47,9 +48,20 @@ class Run(BaseModel):
     budget_reached: bool = False     # a call was not sent because the token budget was reached
 
 
+class TriageAudit(BaseModel):
+    """Whether triage threw real evidence away: some skipped files were read anyway."""
+    skipped: int = 0     # files triage skipped
+    audited: int = 0     # of those, read anyway and read without failure
+    yielded: int = 0     # audited files that had a verified observation
+    yielded_paths: list[str] = Field(default_factory=list)
+    failed_paths: list[str] = Field(default_factory=list)   # audited files whose read failed; not counted in `audited`
+    miss_rate_interval: tuple[float, float] | None = None   # 95% Clopper-Pearson for yielded / audited; null if none audited
+
+
 class Coverage(BaseModel):
     summary: dict[str, int]
     files: list[FileCoverage]
+    triage_audit: TriageAudit | None = None   # set when triage ran
     unused_observations: dict[str, int] = Field(default_factory=dict)   # capability -> count
 
 
@@ -59,6 +71,7 @@ class Diagnostics(BaseModel):
     unconsolidated: dict[str, str] = Field(default_factory=dict)   # capability -> why its merge pass failed
     dropped_scenarios: int = 0   # scenarios the model wrote that were left out (incomplete or uncited)
     open_questions: dict[str, list[str]] = Field(default_factory=dict)
+    triage_unresolved: dict[str, str] = Field(default_factory=dict)   # path -> why triage gave no verdict; the file was read
     review: ReviewSummary | None = None   # set when ids were carried forward or a review file applied
     lint: list[Finding] = Field(default_factory=list)   # deterministic checks on the finished result
     failed_stages: dict[str, str] = Field(default_factory=dict)   # a stage the whole run depends on -> why it failed

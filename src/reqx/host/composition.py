@@ -26,6 +26,7 @@ from reqx.modules.lint.facade import LintReport, lint
 from reqx.modules.report.facade import ExtractionResult
 from reqx.modules.requirements.facade import RequirementsFacade
 from reqx.modules.review.facade import ReviewFacade
+from reqx.modules.triage.facade import TriageFacade
 from reqx.modules.staleness.facade import StalenessFacade, StatusReport
 
 
@@ -54,6 +55,8 @@ class Config:
     max_tokens: int | None = None     # stop sending calls once this many tokens are spent or reserved
     syntax: bool = True               # use symbols from tree-sitter when it is installed; False reads everything as text
     reuse: bool = True                # keep whatever the previous result settled and whose inputs have not changed
+    triage: bool = True               # look at each file first; skip those a model is sure hold no behaviour
+    triage_audit: float = 0.1         # share of the skipped files read anyway: 0 is off, 1.0 reads them all
 
 
 def default_cache_dir(root: Path) -> Path:
@@ -85,7 +88,8 @@ def _wiring(path: str | Path, config: Config):
     directory = (config.cache_dir or default_cache_dir(root)) if config.use_cache else None
     llm = CachedLLM(inner, directory, config.replay, config.max_tokens)
     settings = Settings(include=config.include, exclude=config.exclude, default_excludes=config.default_excludes,
-                        assess_support=config.assess_support, gate=config.gate)
+                        assess_support=config.assess_support, gate=config.gate,
+                        triage=config.triage, triage_audit=config.triage_audit)
     store = YamlCapabilitiesFile(config.capabilities_file or root / CAPABILITIES_FILE)
     return root, name, llm, settings, store
 
@@ -112,7 +116,7 @@ def extract(path: str | Path, config: Config | None = None, progress: Progress =
                capabilities=CapabilitiesFacade(llm, config.concurrency, store),
                requirements=RequirementsFacade(llm, config.concurrency),
                usage=llm.usage, spend=llm.spend, progress=progress, review=ReviewFacade(review_store), before=before,
-               reuse=config.reuse)
+               reuse=config.reuse, triage=TriageFacade(llm, config.concurrency))
 
 
 def status(result: ExtractionResult | str | Path, root: str | Path = ".") -> StatusReport:

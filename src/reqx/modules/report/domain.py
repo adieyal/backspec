@@ -11,7 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-State = Literal["excluded", "skipped", "extracted", "no_requirements", "candidates_rejected", "failed"]
+State = Literal["excluded", "skipped", "extracted", "no_requirements", "candidates_rejected", "failed",
+               "triaged_out"]
 
 
 class FileCoverage(BaseModel):
@@ -25,6 +26,11 @@ class FileCoverage(BaseModel):
     source_hash: str = ""   # the file as it was read, for files that were read
     analysis: Literal["syntax", "text"] = "text"   # how a file that was read was analysed
     line_digest: str = ""   # a short digest per line, so a later run can tell which lines changed
+    triage_role: str = ""        # the role triage gave the file; empty if it was not triaged
+    triage_relevance: str = ""   # high, medium, low, none or unknown
+    triage_skipped: bool = False   # triage judged it surely irrelevant, so it was not read unless audited
+    triage_audited: bool = False   # skipped by triage but read anyway, as part of the audit
+    found_by_audit: bool = False   # audited, and a verified observation came of it
 
 
 def file_state(observations: int, rejected: int, failed: str | None, nothing_reason: str | None) -> tuple[State, str]:

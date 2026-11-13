@@ -6,29 +6,61 @@ import collections
 from reqx.modules.discovery.facade import Discovery
 from reqx.modules.evidence.facade import Earlier, ObservationSet, line_digest
 from reqx.modules.report.domain import CoverageReport, FileCoverage, file_state, worth_looking_at
-from reqx.modules.report.dto import Coverage, ExtractionResult
+from reqx.modules.report.dto import Coverage, ExtractionResult, TriageAudit
 from reqx.modules.requirements.facade import Requirement
+from reqx.modules.triage.facade import EarlierVerdict, TriageResult, Verdict, clopper_pearson
 
 
 def build_coverage(discovery: Discovery, observed: ObservationSet, requirements: list[Requirement],
-                   assignments: dict[str, str]) -> Coverage:
+                   assignments: dict[str, str], triage: TriageResult | None = None) -> Coverage:
     per_file = collections.Counter(o.path for o in observed.observations)
     rejected = collections.Counter(r.path for r in observed.rejected)
     nothing = {entry.path: entry.reason for entry in observed.nothing}
     cited = collections.Counter(path for r in requirements for path in {e.path for e in r.evidence})
     files = [FileCoverage(path=left.path, state=left.state, reason=left.reason) for left in discovery.left]
+    verdicts = triage.verdicts if triage else {}
+    audited = set(triage.audited) if triage else set()
     for source in discovery.files:
-        state, reason = file_state(per_file[source.path], rejected[source.path],
-                                   observed.failed.get(source.path), nothing.get(source.path))
-        files.append(FileCoverage(path=source.path, state=state, reason=reason, observations=per_file[source.path],
-                                  rejected=rejected[source.path], lines=len(source.text.splitlines()),
-                                  analysis=observed.analysis.get(source.path, "text"), cited_by=cited[source.path],
-                                  source_hash=source.source_hash, line_digest=line_digest(source.lines)))
+        verdict = verdicts.get(source.path)
+        out = bool(verdict and verdict.skipped)   # triage skipped it
+        read = not out or source.path in audited
+        failed = observed.failed.get(source.path)
+        state, reason = file_state(per_file[source.path], rejected[source.path], failed, nothing.get(source.path))
+        if out and (not read or (state in ("no_requirements", "candidates_rejected"))):
+            # not read, or audited and yielded nothing: the triage role is the reason
+            state, reason = "triaged_out", verdict.role
+        files.append(FileCoverage(
+            path=source.path, state=state, reason=reason, observations=per_file[source.path],
+            rejected=rejected[source.path], lines=len(source.text.splitlines()),
+            analysis=observed.analysis.get(source.path, "text"), cited_by=cited[source.path], source_hash=source.source_hash,
+            line_digest=line_digest(source.lines) if read else "",
+            triage_role=verdict.role if verdict else "", triage_relevance=verdict.relevance if verdict else "",
+            triage_skipped=out, triage_audited=out and read,
+            found_by_audit=out and read and per_file[source.path] > 0))
     files.sort(key=lambda f: f.path)
     used = {e.observation for r in requirements for e in r.evidence}
     unused = collections.Counter(assignments.get(o.id, "unassigned") for o in observed.observations if o.id not in used)
     return Coverage(summary=dict(collections.Counter(f.state for f in files)), files=files,
-                    unused_observations=dict(sorted(unused.items())))
+                    unused_observations=dict(sorted(unused.items())),
+                    triage_audit=_triage_audit(triage, per_file, observed.failed) if triage else None)
+
+
+def _triage_audit(triage: TriageResult, per_file: collections.Counter, failed: dict[str, str]) -> TriageAudit:
+    read = [path for path in triage.audited if path not in failed]
+    yielded = sorted(path for path in read if per_file[path] > 0)
+    return TriageAudit(skipped=len(triage.skipped), audited=len(read), yielded=len(yielded), yielded_paths=yielded,
+                       failed_paths=sorted(path for path in triage.audited if path in failed),
+                       miss_rate_interval=clopper_pearson(len(yielded), len(read)))
+
+
+def earlier_triage(previous: ExtractionResult, fingerprint: str) -> dict[str, EarlierVerdict]:
+    """The verdicts a saved result reached, for a later run to keep for files that have not changed.
+    Empty when that result was triaged another way."""
+    if not fingerprint or previous.run.triage_fingerprint != fingerprint:
+        return {}
+    return {covered.path: EarlierVerdict(covered.source_hash, Verdict(covered.triage_role, covered.triage_relevance,
+                                                                       covered.triage_skipped))
+            for covered in previous.coverage.files if covered.source_hash and covered.triage_relevance}
 
 
 def coverage_report(result: ExtractionResult) -> CoverageReport:
@@ -52,10 +84,12 @@ def earlier_evidence(previous: ExtractionResult, fingerprint: str) -> dict[str, 
         by_path[observation.path].append(observation)
     earlier = {}
     for covered in previous.coverage.files:
-        if covered.source_hash and covered.state in ("extracted", "no_requirements"):
+        audited_blank = covered.state == "triaged_out" and covered.triage_audited   # read by the audit, nothing found
+        if covered.source_hash and (covered.state in ("extracted", "no_requirements") or audited_blank):
             earlier[covered.path] = Earlier(
                 source_hash=covered.source_hash, observations=tuple(by_path.get(covered.path, [])),
-                nothing_reason=covered.reason if covered.state == "no_requirements" else None,
+                nothing_reason=covered.reason if covered.state == "no_requirements" else
+                ("audited; nothing verified" if audited_blank else None),
                 line_digest=covered.line_digest)
     return earlier
 

@@ -99,9 +99,15 @@ def extract_command(
                                              "many tokens are used or reserved. The run is then partial."),
     text_only: bool = typer.Option(False, "--text-only", help="Read every file as plain text, even if "
                                    "tree-sitter is installed."),
+    no_triage: bool = typer.Option(False, "--no-triage", help="Read every file in full; skip the first look."),
+    triage_audit: float = typer.Option(0.1, "--triage-audit", metavar="FRACTION",
+                                       help="Share of the files triage skips that are read anyway, to check "
+                                            "triage. 0 turns the audit off, 1.0 reads everything triage skips."),
 ) -> None:
     """Run the pipeline on PATH."""
     _check_format(fmt, output)
+    if not 0 <= triage_audit <= 1:
+        raise typer.BadParameter("--triage-audit must be between 0 and 1")
     if dry_run:
         from reqx.host.adapters.filesystem import DiskRepo
         found = DiscoveryFacade(DiskRepo(path)).discover(include, exclude, not no_default_excludes)
@@ -120,7 +126,8 @@ def extract_command(
                     strong_model=model, concurrency=concurrency, cache_dir=cache_dir,
                     use_cache=not no_cache, replay=replay, capabilities_file=capabilities, gate=gate,
                     review_file=review, previous=default_previous(previous, output, fmt), reuse=not no_reuse,
-                    max_tokens=max_tokens, syntax=not text_only)
+                    max_tokens=max_tokens, syntax=not text_only,
+                    triage=not no_triage, triage_audit=triage_audit)
     try:
         result = extract(path, config, progress=_say)
     except ERRORS as error:

@@ -1,4 +1,4 @@
-"""The pipeline: discover, observe and verify, orient, assign, synthesise, assess, report.
+"""The pipeline: discover, triage, observe and verify, orient, assign, synthesise, assess, report.
 
 The program drives. A model is asked to read and to write statements; structure, citations and
 merging are done here and in the modules this composes.
@@ -16,9 +16,10 @@ from reqx.modules.capabilities.facade import PLUMBING, UNASSIGNED, CapabilitiesF
 from reqx.modules.discovery.facade import DiscoveryFacade
 from reqx.modules.evidence.facade import EvidenceFacade
 from reqx.modules.lint.facade import lint_findings
-from reqx.modules.report.facade import Diagnostics, ExtractionResult, Run, StageUsage, build_coverage, earlier_evidence
+from reqx.modules.report.facade import Diagnostics, ExtractionResult, Run, StageUsage, build_coverage, earlier_evidence, earlier_triage
 from reqx.modules.requirements.facade import Requirement, RequirementsFacade
 from reqx.modules.review.facade import ReviewFacade, ReviewSummary
+from reqx.modules.triage.facade import DEFAULT_AUDIT, TriageFacade
 
 TOOL_VERSION = "0.0.1"
 Progress = Callable[[str], None]
@@ -31,13 +32,15 @@ class Settings:
     default_excludes: bool = True
     assess_support: bool = True
     gate: bool = False   # stop once the capabilities are settled, before assignment and synthesis
+    triage: bool = True            # a cheap first look; files surely of no relevance are not read in full
+    triage_audit: float = DEFAULT_AUDIT   # share of the skipped files read anyway; 0 is off, 1.0 reads them all
 
 
 def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade, evidence: EvidenceFacade,
         capabilities: CapabilitiesFacade, requirements: RequirementsFacade,
         usage: Callable[[], tuple[int, int]] = lambda: (0, 0), progress: Progress = lambda _: None,
         review: ReviewFacade | None = None, before: ExtractionResult | None = None,
-        reuse: bool = True, spend: Callable[[], Spend] = Spend) -> ExtractionResult:
+        reuse: bool = True, spend: Callable[[], Spend] = Spend, triage: TriageFacade | None = None) -> ExtractionResult:
     """`before` is the previous result, if there is one. Requirement ids are carried forward from
     it, and with `reuse` so is everything whose inputs have not changed: observations of unchanged
     files, the capabilities, where each observation was placed, and the requirements of any
@@ -48,11 +51,25 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
     found = discovery.discover(settings.include, settings.exclude, settings.default_excludes)
     progress(f"discovered {len(found.files)} files to read, {len(found.left)} left out")
 
+    triaged = None
+    if settings.triage and triage is not None:
+        verdicts = earlier_triage(kept, triage.fingerprint()) if kept else None
+        triaged = triage.assess(list(found.files), verdicts, settings.triage_audit)
+        progress(f"triaged {len(found.files)} files: {len(triaged.skipped)} skipped, "
+                 f"{len(found.files) - len(triaged.skipped)} to read, {len(triaged.audited)} skipped files "
+                 f"read anyway as an audit; {triaged.reused_files} verdicts reused, "
+                 f"{len(triaged.unresolved)} without a verdict (read), in {triaged.batches} batches")
+    to_read = triaged.to_read(list(found.files)) if triaged else list(found.files)
+
     earlier = earlier_evidence(kept, evidence.fingerprint()) if kept else None
-    observed = evidence.observe(list(found.files), earlier)
+    observed = evidence.observe(to_read, earlier)
     progress(f"observed {len(observed.observations)} verified, {len(observed.rejected)} rejected, "
              f"in {observed.batches} batches; {observed.reused_files} unchanged files reused, "
              f"{observed.partly_read_files} changed files read in part")
+
+    if triaged is not None and triaged.audited:
+        found_by_audit = {o.path for o in observed.observations} & set(triaged.audited)
+        progress(f"triage audit: {len(found_by_audit)} of {len(triaged.audited)} audited files had a verified observation")
 
     caps: list[Capability] = []
     assignments: dict[str, str] = {}
@@ -74,6 +91,8 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         except LLMError as error:   # nothing can be placed without capabilities: record it and stop
             orient_failed = str(error)[:300]
 
+    unresolved = dict(triaged.unresolved) if triaged else {}
+
     def describe(status: str, **more: object) -> Run:
         calls, cached = usage()
         used = spend()
@@ -83,7 +102,8 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
                    tokens_estimated=used.estimated, cost_usd=used.cost_usd, budget_reached=used.budget_reached,
                    usage_by_stage={s: StageUsage(**u) for s, u in used.by_stage.items()},
                    observe_fingerprint=evidence.fingerprint(), reused_files=observed.reused_files, **_analysis_counts(observed),
-                   partly_read_files=observed.partly_read_files, synthesis_fingerprint=requirements.fingerprint(), **more)
+                   partly_read_files=observed.partly_read_files, synthesis_fingerprint=requirements.fingerprint(),
+                   triage_fingerprint=triage.fingerprint() if triaged is not None and triage else "", **more)
 
     all_observations = sorted(observed.observations, key=lambda o: (o.path, o.lines[0], o.id))
     if orient_failed:
@@ -97,8 +117,8 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         progress("gate: stopping before assignment and synthesis; edit the file, then run again")
         gated = ExtractionResult(
             run=describe("partial", stopped_after="capabilities"), capabilities=caps, requirements=[],
-            observations=all_observations, assignments={}, coverage=build_coverage(found, observed, [], {}),
-            diagnostics=Diagnostics(rejected=observed.rejected))
+            observations=all_observations, assignments={}, coverage=build_coverage(found, observed, [], {}, triaged),
+            diagnostics=Diagnostics(rejected=observed.rejected, triage_unresolved=unresolved))
         gated.diagnostics.lint = lint_findings(gated)
         return gated
 
@@ -162,11 +182,11 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         run=describe("complete" if complete else "partial", reused_capabilities=sorted(reused_capabilities)),
         capabilities=caps, requirements=final, hidden=sorted(hidden, key=lambda r: (r.capability, r.id)),
         observations=all_observations, assignments=assignments,
-        coverage=build_coverage(found, observed, [*final, *hidden], assignments),
+        coverage=build_coverage(found, observed, [*final, *hidden], assignments, triaged),
         diagnostics=Diagnostics(rejected=observed.rejected, failed_capabilities=synthesis.failed,
                                 unconsolidated=synthesis.unconsolidated,
                                 dropped_scenarios=synthesis.dropped_scenarios, open_questions=open_questions,
-                                review=review_summary))
+                                review=review_summary, triage_unresolved=unresolved))
     result.diagnostics.lint = lint_findings(result)
     return result
 
