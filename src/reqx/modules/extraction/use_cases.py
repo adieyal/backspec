@@ -14,7 +14,8 @@ from reqx.modules.capabilities.facade import PLUMBING, UNASSIGNED, CapabilitiesF
 from reqx.modules.discovery.facade import DiscoveryFacade
 from reqx.modules.evidence.facade import EvidenceFacade
 from reqx.modules.report.facade import Diagnostics, ExtractionResult, Run, build_coverage
-from reqx.modules.requirements.facade import RequirementsFacade
+from reqx.modules.requirements.facade import Requirement, RequirementsFacade
+from reqx.modules.review.facade import ReviewFacade, ReviewSummary
 
 TOOL_VERSION = "0.0.1"
 Progress = Callable[[str], None]
@@ -31,7 +32,8 @@ class Settings:
 
 def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade, evidence: EvidenceFacade,
         capabilities: CapabilitiesFacade, requirements: RequirementsFacade,
-        usage: Callable[[], tuple[int, int]] = lambda: (0, 0), progress: Progress = lambda _: None) -> ExtractionResult:
+        usage: Callable[[], tuple[int, int]] = lambda: (0, 0), progress: Progress = lambda _: None,
+        review: ReviewFacade | None = None, previous: list[Requirement] | None = None) -> ExtractionResult:
     # An unusable capabilities file is refused before any file is read or model called.
     from_file = capabilities.load()
     found = discovery.discover(settings.include, settings.exclude, settings.default_excludes)
@@ -85,6 +87,12 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         final = requirements.assess(final, {f.path: f.lines for f in found.files})
         counts = collections.Counter(r.support for r in final)
         progress("assessed support: " + ", ".join(f"{n} {s}" for s, n in sorted(counts.items())))
+    review_summary: ReviewSummary | None = None
+    if review is not None and review.applies(previous):
+        reviewed = review.apply(final, previous)
+        final, review_summary = reviewed.requirements, reviewed.summary
+        progress(f"review: {review_summary.carried} ids carried, {review_summary.rejected_hidden} rejected hidden, "
+                 f"{review_summary.needs_review} need review, {len(review_summary.stale_entries)} stale entries")
     final = sorted(final, key=lambda r: (r.capability, r.id))
 
     calls, cached = usage()
@@ -98,7 +106,8 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         assignments=assignments,
         coverage=build_coverage(found, observed, final, assignments),
         diagnostics=Diagnostics(rejected=observed.rejected, failed_capabilities=synthesis.failed,
-                                open_questions=synthesis.open_questions))
+                                open_questions=synthesis.open_questions,
+                                review=review_summary))
 
 
 def orient_only(settings: Settings, discovery: DiscoveryFacade, evidence: EvidenceFacade,
