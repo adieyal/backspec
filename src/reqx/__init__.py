@@ -5,9 +5,11 @@
     for requirement in result.requirements:
         print(requirement.id, requirement.support, requirement.statement)
 """
-from reqx.host.composition import Config, extract, status
+from reqx.host.composition import Config, extract, orient, status
 from reqx.kernel.llm import LLMError, LLMPort, LLMRequest
+from reqx.modules.capabilities.facade import Capability
 from reqx.modules.report.facade import ExtractionResult, to_markdown
 from reqx.modules.staleness.facade import StatusReport
 
-__all__ = ["Config", "ExtractionResult", "LLMError", "LLMPort", "LLMRequest", "StatusReport", "extract", "status", "to_markdown"]
+__all__ = ["Capability", "Config", "ExtractionResult", "LLMError", "LLMPort", "LLMRequest", "StatusReport",
+           "extract", "orient", "status", "to_markdown"]

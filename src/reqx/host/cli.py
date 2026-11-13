@@ -4,18 +4,33 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Annotated, Optional
 
 import typer
 
-from reqx.host.composition import Config, extract, status
+from reqx.host.composition import CAPABILITIES_FILE, Config, extract, orient, status
 from reqx.kernel.llm import LLMError
+from reqx.modules.capabilities.facade import CapabilitiesFileError
 from reqx.modules.discovery.facade import DiscoveryFacade
 from reqx.modules.report.facade import ExtractionResult, to_markdown
 from reqx.modules.staleness.facade import summary
 
 app = typer.Typer(add_completion=False, no_args_is_help=True,
                   help="Extract user requirements from a codebase, with verified citations.")
+
+
+Include = Annotated[list[str], typer.Option("--include", help="Gitignore-style pattern to include. Repeatable.")]
+Exclude = Annotated[list[str], typer.Option("--exclude", help="Gitignore-style pattern to exclude. Repeatable.")]
+NoDefaultExcludes = Annotated[bool, typer.Option(help="Do not apply the built-in excludes.")]
+ProviderOpt = Annotated[str, typer.Option("--provider", help="Model backend.")]
+FastModel = Annotated[Optional[str], typer.Option(help="Model for observing, orienting and assigning.")]
+Concurrency = Annotated[int, typer.Option(help="Parallel model calls.")]
+CacheDir = Annotated[Optional[Path], typer.Option(help="Where to cache model replies.")]
+NoCache = Annotated[bool, typer.Option(help="Do not read or write the cache.")]
+Replay = Annotated[bool, typer.Option(help="Serve every call from the cache; fail on a miss.")]
+CapabilitiesOpt = Annotated[Optional[Path], typer.Option(
+    "--capabilities", help=f"The capabilities file. Default: {CAPABILITIES_FILE} under PATH.")]
+ERRORS = (LLMError, NotADirectoryError, CapabilitiesFileError)
 
 
 def _say(message: str) -> None:
@@ -33,19 +48,22 @@ def _emit(text: str, output: Optional[Path]) -> None:
 @app.command("extract")
 def extract_command(
     path: Path = typer.Argument(..., help="The repository or directory to read."),
-    include: list[str] = typer.Option([], "--include", help="Gitignore-style pattern to include. Repeatable."),
-    exclude: list[str] = typer.Option([], "--exclude", help="Gitignore-style pattern to exclude. Repeatable."),
-    no_default_excludes: bool = typer.Option(False, help="Do not apply the built-in excludes."),
+    include: Include = [],
+    exclude: Exclude = [],
+    no_default_excludes: NoDefaultExcludes = False,
     output: Optional[Path] = typer.Option(None, "-o", "--output", help="Write the result here instead of stdout."),
     fmt: str = typer.Option("json", "--format", help="json or md."),
-    provider: str = typer.Option("claude-code", help="Model backend."),
+    provider: ProviderOpt = "claude-code",
     model: Optional[str] = typer.Option(None, help="Model for synthesis and the support check."),
-    fast_model: Optional[str] = typer.Option(None, help="Model for observing, orienting and assigning."),
+    fast_model: FastModel = None,
     no_assess_support: bool = typer.Option(False, help="Skip the support check."),
-    concurrency: int = typer.Option(4, help="Parallel model calls."),
-    cache_dir: Optional[Path] = typer.Option(None, help="Where to cache model replies."),
-    no_cache: bool = typer.Option(False, help="Do not read or write the cache."),
-    replay: bool = typer.Option(False, help="Serve every call from the cache; fail on a miss."),
+    concurrency: Concurrency = 4,
+    cache_dir: CacheDir = None,
+    no_cache: NoCache = False,
+    replay: Replay = False,
+    capabilities: CapabilitiesOpt = None,
+    gate: bool = typer.Option(False, help="Write the capabilities file if there is none, then stop before "
+                                          "assignment and synthesis."),
     dry_run: bool = typer.Option(False, help="List the files that would be read, and stop."),
 ) -> None:
     """Run the pipeline on PATH."""
@@ -65,16 +83,47 @@ def extract_command(
     config = Config(include=include, exclude=exclude, default_excludes=not no_default_excludes,
                     assess_support=not no_assess_support, provider=provider, fast_model=fast_model,
                     strong_model=model, concurrency=concurrency, cache_dir=cache_dir,
-                    use_cache=not no_cache, replay=replay)
+                    use_cache=not no_cache, replay=replay, capabilities_file=capabilities, gate=gate)
     try:
         result = extract(path, config, progress=_say)
-    except (LLMError, NotADirectoryError) as error:
+    except ERRORS as error:
         _say(f"error: {error}")
         raise typer.Exit(2)
     _emit(result.to_json() if fmt == "json" else to_markdown(result), output)
     _say(f"{len(result.requirements)} requirements; {result.run.calls} model calls, "
          f"{result.run.cached_calls} from cache; status {result.run.status}")
+    if result.run.stopped_after:
+        _say(f"stopped after {result.run.stopped_after}, as asked by --gate")
+        raise typer.Exit(0)
     raise typer.Exit(0 if result.run.status == "complete" else 1)
+
+
+@app.command("orient")
+def orient_command(
+    path: Path = typer.Argument(..., help="The repository or directory to read."),
+    include: Include = [],
+    exclude: Exclude = [],
+    no_default_excludes: NoDefaultExcludes = False,
+    provider: ProviderOpt = "claude-code",
+    fast_model: FastModel = None,
+    concurrency: Concurrency = 4,
+    cache_dir: CacheDir = None,
+    no_cache: NoCache = False,
+    replay: Replay = False,
+    capabilities: CapabilitiesOpt = None,
+    force: bool = typer.Option(False, "--force", help="Replace the capabilities file if it exists."),
+) -> None:
+    """Propose the capabilities of PATH, write them to the capabilities file and stop."""
+    config = Config(include=include, exclude=exclude, default_excludes=not no_default_excludes, provider=provider,
+                    fast_model=fast_model, concurrency=concurrency, cache_dir=cache_dir, use_cache=not no_cache,
+                    replay=replay, capabilities_file=capabilities)
+    try:
+        found = orient(path, config, progress=_say, force=force)
+    except (*ERRORS, FileExistsError, ValueError) as error:
+        _say(f"error: {error}")
+        raise typer.Exit(2)
+    for capability in found:
+        typer.echo(f"{capability.id}: {capability.name}")
 
 
 @app.command("render")

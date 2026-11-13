@@ -8,16 +8,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from reqx.host.adapters.cache import CachedLLM
+from reqx.host.adapters.capabilities_file import YamlCapabilitiesFile
 from reqx.host.adapters.claude_code import ClaudeCode
 from reqx.host.adapters.filesystem import DiskRepo
 from reqx.kernel.llm import LLMError, LLMPort
-from reqx.modules.capabilities.facade import CapabilitiesFacade
+from reqx.modules.capabilities.facade import CapabilitiesFacade, Capability
 from reqx.modules.discovery.facade import DiscoveryFacade
 from reqx.modules.evidence.facade import EvidenceFacade
-from reqx.modules.extraction.facade import Progress, Settings, run
+from reqx.modules.extraction.facade import Progress, Settings, orient_only, run
 from reqx.modules.report.facade import ExtractionResult
 from reqx.modules.requirements.facade import RequirementsFacade
 from reqx.modules.staleness.facade import StalenessFacade, StatusReport
+
+
+CAPABILITIES_FILE = "reqx.capabilities.yaml"
 
 
 @dataclass
@@ -34,6 +38,8 @@ class Config:
     cache_dir: Path | None = None
     use_cache: bool = True
     replay: bool = False
+    capabilities_file: Path | None = None   # default: CAPABILITIES_FILE under the root
+    gate: bool = False   # write the capabilities file if there is none, and stop before assignment
 
 
 def default_cache_dir(root: Path) -> Path:
@@ -51,21 +57,31 @@ def _provider(config: Config) -> tuple[LLMPort, str]:
                    "pass a provider object to use another.")
 
 
-def extract(path: str | Path, config: Config | None = None, progress: Progress = lambda _: None) -> ExtractionResult:
-    """Read the code under `path` and return its requirements, observations and coverage."""
-    config = config or Config()
+def _wiring(path: str | Path, config: Config):
     root = Path(path).resolve()
     if not root.is_dir():
         raise NotADirectoryError(f"{root} is not a directory")
     inner, name = _provider(config)
     directory = (config.cache_dir or default_cache_dir(root)) if config.use_cache else None
     llm = CachedLLM(inner, directory, config.replay)
-    settings = Settings(include=config.include, exclude=config.exclude,
-                        default_excludes=config.default_excludes, assess_support=config.assess_support)
+    settings = Settings(include=config.include, exclude=config.exclude, default_excludes=config.default_excludes,
+                        assess_support=config.assess_support, gate=config.gate)
+    store = YamlCapabilitiesFile(config.capabilities_file or root / CAPABILITIES_FILE)
+    return root, name, llm, settings, store
+
+
+def extract(path: str | Path, config: Config | None = None, progress: Progress = lambda _: None) -> ExtractionResult:
+    """Read the code under `path` and return its requirements, observations and coverage.
+
+    A capabilities file, if there is one, is used as it is. With `Config(gate=True)` the run stops
+    once the capabilities are settled: requirements are empty, `run.status` is `partial` and
+    `run.stopped_after` is `capabilities`."""
+    config = config or Config()
+    root, name, llm, settings, store = _wiring(path, config)
     return run(root=root.name, provider=name, settings=settings,
                discovery=DiscoveryFacade(DiskRepo(root)),
                evidence=EvidenceFacade(llm, config.concurrency),
-               capabilities=CapabilitiesFacade(llm, config.concurrency),
+               capabilities=CapabilitiesFacade(llm, config.concurrency, store),
                requirements=RequirementsFacade(llm, config.concurrency),
                usage=llm.usage, progress=progress)
 
@@ -76,3 +92,13 @@ def status(result: ExtractionResult | str | Path, root: str | Path = ".") -> Sta
     if not isinstance(result, ExtractionResult):
         result = ExtractionResult.model_validate_json(Path(result).read_text(encoding="utf-8"))
     return StalenessFacade(DiskRepo(root)).check(result)
+
+
+def orient(path: str | Path, config: Config | None = None, progress: Progress = lambda _: None,
+           force: bool = False) -> list[Capability]:
+    """Propose the capabilities of the code under `path` and write them to the capabilities file.
+    Raises FileExistsError if the file exists, unless `force`."""
+    config = config or Config()
+    root, _, llm, settings, store = _wiring(path, config)
+    return orient_only(settings, DiscoveryFacade(DiskRepo(root)), EvidenceFacade(llm, config.concurrency),
+                       CapabilitiesFacade(llm, config.concurrency, store), force, progress)

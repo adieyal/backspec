@@ -21,6 +21,8 @@ class Run(BaseModel):
     root: str
     calls: int = 0
     cached_calls: int = 0
+    capabilities_source: Literal["file", "oriented"] = "oriented"
+    stopped_after: Literal["capabilities"] | None = None   # set when a gated run stopped early
 
 
 class Coverage(BaseModel):
