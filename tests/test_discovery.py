@@ -38,3 +38,9 @@ def test_every_listed_file_ends_in_exactly_one_place():
     assert left == {"src/b.bin": ("skipped", "binary"), ".env": ("excluded", "default_exclude"),
                     "docs/r.md": ("excluded", "not_included")}
     assert len(read) + len(left) == 4
+
+
+def test_reqx_does_not_read_its_own_files_as_source():
+    assert excluded_by_pattern("reqx.capabilities.yaml", [], []) == "default_exclude"
+    assert excluded_by_pattern("reqx.review.yaml", [], []) == "default_exclude"
+    assert excluded_by_pattern("config/reqx.review.yaml", [], []) is None
