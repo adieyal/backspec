@@ -21,7 +21,8 @@ def build_coverage(discovery: Discovery, observed: ObservationSet, requirements:
         state, reason = file_state(per_file[source.path], rejected[source.path],
                                    observed.failed.get(source.path), nothing.get(source.path))
         files.append(FileCoverage(path=source.path, state=state, reason=reason, observations=per_file[source.path],
-                                  rejected=rejected[source.path], lines=len(source.text.splitlines()), cited_by=cited[source.path],
+                                  rejected=rejected[source.path], lines=len(source.text.splitlines()),
+                                  analysis=observed.analysis.get(source.path, "text"), cited_by=cited[source.path],
                                   source_hash=source.source_hash, line_digest=line_digest(source.lines)))
     files.sort(key=lambda f: f.path)
     used = {e.observation for r in requirements for e in r.evidence}
@@ -80,7 +81,7 @@ def to_markdown(result: ExtractionResult, include_technical: bool = False) -> st
                 out.append(f"    - Condition: {condition}")
             if requirement.support_note and requirement.support != "direct":
                 out.append(f"    - Not shown: {requirement.support_note}")
-            cites = ", ".join(f"`{e.path}:{e.lines[0]}-{e.lines[1]}`" for e in requirement.evidence[:6])
+            cites = ", ".join(f"`{e.path}:{e.lines[0]}-{e.lines[1]}`" + (f" ({e.symbol})" if e.symbol else "") for e in requirement.evidence[:6])
             more = f" and {len(requirement.evidence) - 6} more" if len(requirement.evidence) > 6 else ""
             out.append(f"    - Evidence: {cites}{more}")
             for scenario in requirement.scenarios:

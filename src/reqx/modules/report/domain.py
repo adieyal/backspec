@@ -23,6 +23,7 @@ class FileCoverage(BaseModel):
     lines: int = 0   # length of the file as it was read, for files that were read
     cited_by: int = 0   # requirements that cite this file
     source_hash: str = ""   # the file as it was read, for files that were read
+    analysis: Literal["syntax", "text"] = "text"   # how a file that was read was analysed
     line_digest: str = ""   # a short digest per line, so a later run can tell which lines changed
 
 

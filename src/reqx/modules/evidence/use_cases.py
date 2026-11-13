@@ -14,7 +14,9 @@ from reqx.kernel.llm import LLMError, LLMPort, LLMRequest, ask
 from reqx.modules.discovery.facade import SourceFile
 from reqx.kernel.text import short_hash
 from reqx.modules.evidence.domain import (Chunk, Earlier, NothingFound, Observation, ObserveReply, Rejected,
-                                          carried, compare, pack, render, split_file, verify, windows)
+                                          Symbol, carried, compare, enclosing_symbol, pack, render, split_file,
+                                          verify, windows)
+from reqx.modules.evidence.ports import SyntaxPort
 
 BATCH_LINES = 1300
 
@@ -29,19 +31,32 @@ class ObservationSet:
     reused_files: int = 0   # unchanged since the earlier run, so not read again
     partly_read_files: int = 0   # changed since the earlier run: only the changed parts were read
     outside_change: int = 0      # observations a model made of unchanged lines while reading a change; not kept
+    analysis: dict[str, str] = field(default_factory=dict)   # path -> "syntax" or "text": how the file was analysed
 
 
-def fingerprint(batch_lines: int = BATCH_LINES) -> str:
-    """Changes whenever the way files are observed does. Earlier observations made another way
-    are not reused."""
-    return short_hash(prompts.load("observe"), batch_lines, "ids-by-cited-text")
+def fingerprint(batch_lines: int = BATCH_LINES, syntax: bool = False) -> str:
+    """Changes whenever the way files are observed does, syntax support on or off included.
+    Earlier observations made another way are not reused."""
+    parts = [prompts.load("observe"), batch_lines, "ids-by-cited-text"]
+    return short_hash(*parts, "syntax") if syntax else short_hash(*parts)
+
+
+def _symbols(syntax: SyntaxPort | None, file: SourceFile) -> list[Symbol] | None:
+    """The symbols of a file, or None: no parser, no grammar, or a parser that failed."""
+    if syntax is None:
+        return None
+    try:
+        return syntax.symbols(file.path, file.text)
+    except Exception:
+        return None
 
 
 def observe(files: list[SourceFile], llm: LLMPort, workers: int = 4, batch_lines: int = BATCH_LINES,
-            earlier: dict[str, Earlier] | None = None) -> ObservationSet:
+            earlier: dict[str, Earlier] | None = None, syntax: SyntaxPort | None = None) -> ObservationSet:
+    symbols = {f.path: _symbols(syntax, f) for f in files}
     file_lines = {f.path: f.lines for f in files}
     hashes = {f.path: f.source_hash for f in files}
-    result = ObservationSet()
+    result = ObservationSet(analysis={path: "text" if found is None else "syntax" for path, found in symbols.items()})
     seen: set[str] = set()
     to_read = []
     partial: list[Chunk] = []
@@ -75,7 +90,7 @@ def observe(files: list[SourceFile], llm: LLMPort, workers: int = 4, batch_lines
                 result.observations.append(observation)
         if known.nothing_reason is not None and not known.observations:
             result.nothing.append(NothingFound(path=f.path, reason=known.nothing_reason))
-    chunks = [chunk for f in to_read for chunk in split_file(f.path, f.lines, batch_lines)] + partial
+    chunks = [chunk for f in to_read for chunk in split_file(f.path, f.lines, batch_lines, symbols[f.path])] + partial
     batches = pack(chunks, batch_lines)
     result.batches = len(batches)
     instructions = prompts.load("observe")
@@ -105,4 +120,9 @@ def observe(files: list[SourceFile], llm: LLMPort, workers: int = 4, batch_lines
             elif checked.id not in seen:
                 seen.add(checked.id)
                 result.observations.append(checked)
+    # Where an observation sits is worked out here, from the file as it is now, for new, carried and
+    # reused observations alike: code may have moved between symbols since an earlier run.
+    result.observations = [
+        o.model_copy(update={"symbol": symbol}) if (symbol := enclosing_symbol(symbols.get(o.path), *o.lines)) != o.symbol else o
+        for o in result.observations]
     return result

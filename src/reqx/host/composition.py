@@ -15,6 +15,7 @@ from reqx.host.adapters.capabilities_file import YamlCapabilitiesFile
 from reqx.host.adapters.claude_code import ClaudeCode
 from reqx.host.adapters.codex import Codex
 from reqx.host.adapters.filesystem import DiskRepo
+from reqx.host.adapters.treesitter import TreeSitterSyntax
 from reqx.host.adapters.review_yaml import YamlReviewStore
 from reqx.kernel.llm import LLMError, LLMPort
 from reqx.modules.capabilities.facade import CapabilitiesFacade, Capability
@@ -51,6 +52,7 @@ class Config:
     review_file: Path | None = None   # default: reqx.review.yaml under the root, used only if it exists
     previous: Path | None = None      # a saved JSON result whose ids this run carries forward
     max_tokens: int | None = None     # stop sending calls once this many tokens are spent or reserved
+    syntax: bool = True               # use symbols from tree-sitter when it is installed; False reads everything as text
     reuse: bool = True                # keep whatever the previous result settled and whose inputs have not changed
 
 
@@ -69,6 +71,10 @@ def _provider(config: Config) -> tuple[LLMPort, str]:
         return Codex(config.fast_model, config.strong_model), "codex"
     raise LLMError(f"Unknown provider {config.provider!r}. This version ships `claude-code` and `codex`; "
                    "pass a provider object to use another.")
+
+
+def _evidence(llm: LLMPort, config: Config) -> EvidenceFacade:
+    return EvidenceFacade(llm, config.concurrency, TreeSitterSyntax.load() if config.syntax else None)
 
 
 def _wiring(path: str | Path, config: Config):
@@ -102,7 +108,7 @@ def extract(path: str | Path, config: Config | None = None, progress: Progress =
         settings.exclude = [*settings.exclude, "/" + Path(config.previous).resolve().relative_to(root).as_posix()]
     return run(root=root.name, provider=name, settings=settings,
                discovery=DiscoveryFacade(DiskRepo(root)),
-               evidence=EvidenceFacade(llm, config.concurrency),
+               evidence=_evidence(llm, config),
                capabilities=CapabilitiesFacade(llm, config.concurrency, store),
                requirements=RequirementsFacade(llm, config.concurrency),
                usage=llm.usage, spend=llm.spend, progress=progress, review=ReviewFacade(review_store), before=before,
@@ -145,7 +151,7 @@ def orient(path: str | Path, config: Config | None = None, progress: Progress = 
     Raises FileExistsError if the file exists, unless `force`."""
     config = config or Config()
     root, _, llm, settings, store = _wiring(path, config)
-    return orient_only(settings, DiscoveryFacade(DiskRepo(root)), EvidenceFacade(llm, config.concurrency),
+    return orient_only(settings, DiscoveryFacade(DiskRepo(root)), _evidence(llm, config),
                        CapabilitiesFacade(llm, config.concurrency, store), force, progress)
 
 

@@ -177,6 +177,22 @@ Not guaranteed:
 - That all requirements were found. File coverage is not completeness.
 - That cited code is reachable. reqx reads code and does not run it.
 
+## Optional syntax support
+
+reqx needs no parser. If `tree-sitter-language-pack` is installed (`pip install "reqx[treesitter]"`),
+files in Python, JavaScript, TypeScript, TSX, Go, Java, Ruby, Rust, C# and PHP are analysed with it:
+
+- a large file is cut between top-level functions and classes, not inside one;
+- each observation, and the evidence copied from it, names the innermost function, method or class
+  that holds its whole line range (`symbol`, set in code); the Markdown shows it as
+  `path:10-14` (Shop.buy);
+- `coverage.files[].analysis` says `syntax` or `text` for each file, and `run.syntax_files` and
+  `run.text_files` count them.
+
+Without the package, for another language, or when parsing fails, a file is read as text, as
+before. `reqx extract --text-only` (`Config(syntax=False)`) does that even when it is installed.
+Observations made one way are not reused by a run made the other way.
+
 ## Layout
 
 One module per capability under `src/reqx/modules/`, each with a `domain.py`, `use_cases.py`
@@ -190,5 +206,5 @@ python3 -m pytest -q
 ## Not built yet
 
 Triage, the
-triage audit, tree-sitter, and the HTML renderer. The Codex adapter exists but is unverified
-against the real CLI. See the spec.
+triage audit, and the HTML renderer. The Codex adapter exists but is unverified against the real
+CLI. See the spec.

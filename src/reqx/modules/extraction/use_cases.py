@@ -79,10 +79,10 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         used = spend()
         return Run(status=status, tool_version=TOOL_VERSION, prompt_version=PROMPT_VERSION, provider=provider,
                    root=root, calls=calls, cached_calls=cached, capabilities_source=source,
-                   observe_fingerprint=evidence.fingerprint(), reused_files=observed.reused_files,
                    input_tokens=used.input_tokens, output_tokens=used.output_tokens,
                    tokens_estimated=used.estimated, cost_usd=used.cost_usd, budget_reached=used.budget_reached,
                    usage_by_stage={s: StageUsage(**u) for s, u in used.by_stage.items()},
+                   observe_fingerprint=evidence.fingerprint(), reused_files=observed.reused_files, **_analysis_counts(observed),
                    partly_read_files=observed.partly_read_files, synthesis_fingerprint=requirements.fingerprint(), **more)
 
     all_observations = sorted(observed.observations, key=lambda o: (o.path, o.lines[0], o.id))
@@ -171,17 +171,22 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
     return result
 
 
+def _analysis_counts(observed) -> dict[str, int]:
+    modes = list(observed.analysis.values())
+    return {"syntax_files": modes.count("syntax"), "text_files": modes.count("text")}
+
+
 def _refreshed(requirement: Requirement, current: dict) -> Requirement:
     """A kept requirement with its evidence pointing at where the cited code is now. The lines
     may have moved since it was written; the cited text has not changed."""
-    evidence = [e.model_copy(update={"path": current[e.observation].path, "lines": current[e.observation].lines,
-                                     "quote": current[e.observation].quote})
-                if e.observation in current else e for e in requirement.evidence]
-    scenarios = [s.model_copy(update={"evidence": [
-        e.model_copy(update={"path": current[e.observation].path, "lines": current[e.observation].lines,
-                             "quote": current[e.observation].quote}) if e.observation in current else e
-        for e in s.evidence]}) for s in requirement.scenarios]
-    return requirement.model_copy(update={"review": "unreviewed", "evidence": evidence, "scenarios": scenarios})
+    def moved(evidence: list) -> list:
+        return [e.model_copy(update={"path": current[e.observation].path, "lines": current[e.observation].lines,
+                                     "quote": current[e.observation].quote,
+                                     "symbol": getattr(current[e.observation], "symbol", None)})
+                if e.observation in current else e for e in evidence]
+    scenarios = [s.model_copy(update={"evidence": moved(s.evidence)}) for s in requirement.scenarios]
+    return requirement.model_copy(update={"review": "unreviewed", "evidence": moved(requirement.evidence),
+                                          "scenarios": scenarios})
 
 
 def orient_only(settings: Settings, discovery: DiscoveryFacade, evidence: EvidenceFacade,

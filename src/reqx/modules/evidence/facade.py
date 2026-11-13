@@ -3,20 +3,22 @@ from __future__ import annotations
 
 from reqx.kernel.llm import LLMPort
 from reqx.modules.discovery.facade import SourceFile
-from reqx.modules.evidence.domain import Earlier, NothingFound, Observation, Rejected, line_digest
+from reqx.modules.evidence.domain import Earlier, NothingFound, Observation, Rejected, Symbol, line_digest
+from reqx.modules.evidence.ports import SyntaxPort
 from reqx.modules.evidence.use_cases import ObservationSet, fingerprint, observe
 
-__all__ = ["Earlier", "EvidenceFacade", "NothingFound", "Observation", "ObservationSet", "Rejected", "line_digest"]
+__all__ = ["Earlier", "EvidenceFacade", "NothingFound", "Observation", "ObservationSet", "Rejected", "Symbol", "SyntaxPort", "line_digest"]
 
 
 class EvidenceFacade:
-    def __init__(self, llm: LLMPort, workers: int = 4):
+    def __init__(self, llm: LLMPort, workers: int = 4, syntax: SyntaxPort | None = None):
         self._llm = llm
+        self._syntax = syntax
         self._workers = workers
 
     def observe(self, files: list[SourceFile], earlier: dict[str, Earlier] | None = None) -> ObservationSet:
-        return observe(files, self._llm, self._workers, earlier=earlier)
+        return observe(files, self._llm, self._workers, earlier=earlier, syntax=self._syntax)
 
     def fingerprint(self) -> str:
         """Identifies the way files are observed; earlier observations made another way are not reused."""
-        return fingerprint()
+        return fingerprint(syntax=self._syntax is not None)

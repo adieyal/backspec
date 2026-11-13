@@ -21,6 +21,16 @@ Kind = Literal["entry_point", "permission", "validation", "state_change", "rule"
 
 
 @dataclass(frozen=True)
+class Symbol:
+    """A named definition in a file. Lines are 1-based and inclusive. `name` is qualified by the
+    symbols around it (`Class.method`)."""
+    name: str
+    kind: Literal["function", "method", "class", "other"]
+    first_line: int
+    last_line: int
+
+
+@dataclass(frozen=True)
 class Chunk:
     """A run of lines from one file, with the real number of its first line."""
     path: str
@@ -60,6 +70,7 @@ class Observation(BaseModel):
     quote: str
     source_hash: str
     verified: Literal["exact", "repaired"]
+    symbol: str | None = None   # innermost symbol holding the whole range; set in code, never by a model
 
 
 @dataclass(frozen=True)
@@ -80,20 +91,60 @@ class Rejected(BaseModel):
     reason: str
 
 
-def split_file(path: str, lines: list[str], limit: int) -> list[Chunk]:
-    """A file as chunks of at most `limit` lines, cut at a blank line before top-level code
-    where one is near, so that a function is not cut in half."""
+def split_file(path: str, lines: list[str], limit: int, symbols: list[Symbol] | None = None) -> list[Chunk]:
+    """A file as chunks of at most `limit` lines. With `symbols`, a cut falls between top-level
+    symbols, never inside one, whenever that fits within the limit. Otherwise (and for a single
+    symbol larger than the limit) it is at a blank line before top-level code where one is near."""
+    cuts = _symbol_cuts(lines, symbols) if symbols else []
     chunks, start = [], 0
     while start < len(lines):
         end = min(start + limit, len(lines))
         if end < len(lines):
-            for cut in range(end, max(start + limit // 2, end - 150), -1):
-                if not lines[cut - 1].strip() and not lines[cut].startswith((" ", "\t")):
-                    end = cut
-                    break
+            fits = [cut for cut in cuts if start < cut <= end]
+            if fits:
+                end = max(fits)
+            else:
+                end = _text_cut(lines, start, end, limit)
         chunks.append(Chunk(path, start + 1, tuple(lines[start:end])))
         start = end
     return chunks
+
+
+def _text_cut(lines: list[str], start: int, end: int, limit: int) -> int:
+    for cut in range(end, max(start + limit // 2, end - 150), -1):
+        if not lines[cut - 1].strip() and not lines[cut].startswith((" ", "\t")):
+            return cut
+    return end
+
+
+def _symbol_cuts(lines: list[str], symbols: list[Symbol]) -> list[int]:
+    """Line numbers after which a chunk may end: just after a top-level symbol, or just before one
+    (taking the comment lines directly above it along with it)."""
+    top: list[Symbol] = []
+    for symbol in sorted(symbols, key=lambda s: (s.first_line, -s.last_line)):
+        if not top or symbol.first_line > top[-1].last_line:
+            top.append(symbol)
+    cuts: set[int] = set()
+    previous_end = 0
+    for symbol in top:
+        cut = symbol.first_line - 1
+        while cut > previous_end and cut <= len(lines) and lines[cut - 1].strip():
+            cut -= 1
+        cuts.add(cut)
+        cuts.add(symbol.last_line)
+        previous_end = symbol.last_line
+    return sorted(c for c in cuts if 0 < c < len(lines))
+
+
+def enclosing_symbol(symbols: list[Symbol] | None, first: int, last: int) -> str | None:
+    """The qualified name of the innermost symbol that contains the whole range, or None."""
+    best: Symbol | None = None
+    for symbol in symbols or []:
+        if symbol.first_line <= first and last <= symbol.last_line:
+            if best is None or (symbol.last_line - symbol.first_line, -symbol.name.count(".")) < \
+                    (best.last_line - best.first_line, -best.name.count(".")):
+                best = symbol
+    return best.name if best else None
 
 
 def pack(chunks: list[Chunk], limit: int) -> list[list[Chunk]]:

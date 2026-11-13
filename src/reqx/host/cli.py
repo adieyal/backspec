@@ -97,6 +97,8 @@ def extract_command(
                                           "no evidenced scenario (default: strict)."),
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", min=1, help="Stop sending model calls once this "
                                              "many tokens are used or reserved. The run is then partial."),
+    text_only: bool = typer.Option(False, "--text-only", help="Read every file as plain text, even if "
+                                   "tree-sitter is installed."),
 ) -> None:
     """Run the pipeline on PATH."""
     _check_format(fmt, output)
@@ -118,7 +120,7 @@ def extract_command(
                     strong_model=model, concurrency=concurrency, cache_dir=cache_dir,
                     use_cache=not no_cache, replay=replay, capabilities_file=capabilities, gate=gate,
                     review_file=review, previous=default_previous(previous, output, fmt), reuse=not no_reuse,
-                    max_tokens=max_tokens)
+                    max_tokens=max_tokens, syntax=not text_only)
     try:
         result = extract(path, config, progress=_say)
     except ERRORS as error:
@@ -152,11 +154,13 @@ def orient_command(
     replay: Replay = False,
     capabilities: CapabilitiesOpt = None,
     force: bool = typer.Option(False, "--force", help="Replace the capabilities file if it exists."),
+    text_only: bool = typer.Option(False, "--text-only", help="Read every file as plain text, even if "
+                                   "tree-sitter is installed."),
 ) -> None:
     """Propose the capabilities of PATH, write them to the capabilities file and stop."""
     config = Config(include=include, exclude=exclude, default_excludes=not no_default_excludes, provider=provider,
                     fast_model=fast_model, concurrency=concurrency, cache_dir=cache_dir, use_cache=not no_cache,
-                    replay=replay, capabilities_file=capabilities)
+                    replay=replay, capabilities_file=capabilities, syntax=not text_only)
     try:
         found = orient(path, config, progress=_say, force=force)
     except (*ERRORS, FileExistsError, ValueError) as error:

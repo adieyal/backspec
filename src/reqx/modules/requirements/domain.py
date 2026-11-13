@@ -34,6 +34,7 @@ class Evidence(BaseModel):
     path: str
     lines: tuple[int, int]
     quote: str
+    symbol: str | None = None   # copied from the observation
 
 
 class Scenario(BaseModel):
@@ -122,7 +123,8 @@ def _copied(cited: list[CitedObservation], known: dict[str, Observed]) -> list[E
         obs = known.get(c.observation)
         if obs is not None:
             evidence.append(Evidence(observation=obs.id, role="context" if c.role == "context" else "establishes",
-                                     path=obs.path, lines=obs.lines, quote=obs.quote))
+                                     path=obs.path, lines=obs.lines, quote=obs.quote,
+                                     symbol=getattr(obs, "symbol", None)))
     return evidence
 
 
