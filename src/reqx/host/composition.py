@@ -17,6 +17,7 @@ from reqx.modules.evidence.facade import EvidenceFacade
 from reqx.modules.extraction.facade import Progress, Settings, run
 from reqx.modules.report.facade import ExtractionResult
 from reqx.modules.requirements.facade import RequirementsFacade
+from reqx.modules.staleness.facade import StalenessFacade, StatusReport
 
 
 @dataclass
@@ -67,3 +68,11 @@ def extract(path: str | Path, config: Config | None = None, progress: Progress =
                capabilities=CapabilitiesFacade(llm, config.concurrency),
                requirements=RequirementsFacade(llm, config.concurrency),
                usage=llm.usage, progress=progress)
+
+
+def status(result: ExtractionResult | str | Path, root: str | Path = ".") -> StatusReport:
+    """Which requirements in a result rest on files that are no longer what was read.
+    `result` is an ExtractionResult or the path of a saved JSON result. No model is called."""
+    if not isinstance(result, ExtractionResult):
+        result = ExtractionResult.model_validate_json(Path(result).read_text(encoding="utf-8"))
+    return StalenessFacade(DiskRepo(root)).check(result)
