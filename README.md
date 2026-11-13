@@ -52,10 +52,11 @@ reqx extract ./repo --max-tokens 400000
 reqx render reqs.json -o REQUIREMENTS.md
 reqx render reqs.json --format csv -o reqs.csv            # one row per requirement and evidence pair
 reqx render reqs.json --format openspec -o spec/          # a directory; -o is required
+reqx render reqs.json --format html -o reqs.html --title "My shop"   # one page, opens offline
 reqx extract ./repo --format csv -o reqs.csv
 ```
 
-Formats: `json`, `md` (default for `render`), `csv` and `openspec`; an unknown name is refused with
+Formats: `json`, `md` (default for `render`), `csv`, `html` and `openspec`; an unknown name is refused with
 the list. `csv` adds `--include-hidden` (a `hidden` column). `openspec` writes
 `specs/<capability>/spec.md`, `NOT_EXPORTED.md` and `README.md`. Only requirements with support
 `direct` or `partial` are exported, and, with `--strict` (the default), only those with a scenario.
@@ -212,6 +213,19 @@ live in `src/reqx/host/`. The import rules are enforced by `tests/test_architect
 python3 -m pytest -q
 ```
 
-## Not built yet
+## The HTML report
 
-The HTML renderer. The Codex adapter exists but is unverified against the real CLI. See the spec.
+`--format html` writes one self-contained page that loads nothing from the network. It shows little
+at a time: the overview lists the capabilities and a search box; a capability lists its
+requirements as single sentences; a requirement opens to its conditions, scenarios and cited lines.
+"To review" holds the requirements below direct support and, folded away, open questions, lint
+findings and failures. "Coverage" lists the files by state, folded, with the run's details.
+
+The template is `src/reqx/templates/report.html`. Its look follows `DESIGN.md` at the root of this
+repository (the ThoughtStream design system from designmd.ai); the heading font, Libre Baskerville
+(OFL), is embedded in the page.
+
+## Not verified
+
+The Codex adapter has never been run against the real `codex` CLI. Requirement precision has not
+been checked by a person. See the spec.

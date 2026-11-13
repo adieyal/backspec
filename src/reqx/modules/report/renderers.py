@@ -6,12 +6,16 @@ ignores the ones that do not concern it.
 """
 from __future__ import annotations
 
+import base64
 import collections
 import csv
 import io
+import json
 import re
+from pathlib import PurePath
 from typing import Callable
 
+from reqx.kernel import templates
 from reqx.modules.report.domain import RenderOutput, one_line, requirement_title, with_shall
 from reqx.modules.report.dto import ExtractionResult
 from reqx.modules.report.use_cases import to_markdown
@@ -157,11 +161,50 @@ def render_openspec(result: ExtractionResult, strict: bool | None = None, **opti
     return RenderOutput(files=files)
 
 
+BODY_MARK = "<!--REQX_BODY-->"
+PAGE = ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
+        '{head}</head>\n<body>\n{body}</body>\n</html>\n')
+
+
+def page_data(result: ExtractionResult, title: str) -> dict:
+    """What the page draws from: the result without the parts only a later run needs."""
+    data = result.model_dump(mode="json", exclude={"assignments": True, "observations": True,
+                                                   "coverage": {"files": {"__all__": {"line_digest", "source_hash"}}}})
+    data["title"] = title
+    data["observations"] = [o.id for o in result.observations]
+    data["observations_by_id"] = {o.id: o.statement for o in result.observations}
+    return data
+
+
+def render_html(result: ExtractionResult, title: str | None = None, fragment: bool = False, **options) -> RenderOutput:
+    """One self-contained page: the capabilities, each requirement with its evidence, what needs a
+    second look, and coverage.
+    It loads nothing from the network. `fragment` leaves out the document wrapper, for a host
+    that supplies its own."""
+    name = title or PurePath(result.run.root).name or "This codebase"
+    # "<" never appears raw in the embedded data, so nothing in a result can close the script element
+    data = json.dumps(page_data(result, name), ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
+    template = templates.load("report.html").replace("__REQX_TITLE__", _escape(f"{name} requirements"))
+    template = re.sub(r"__REQX_FONT:([a-z0-9.-]+)__",
+                      lambda m: base64.b64encode(templates.load_bytes(m.group(1))).decode("ascii"), template)
+    template = template.replace("__REQX_DATA__", data)
+    if fragment:
+        return RenderOutput(text=template.replace(BODY_MARK + "\n", ""))
+    head, body = template.split(BODY_MARK + "\n", 1)
+    return RenderOutput(text=PAGE.format(head=head, body=body))
+
+
+def _escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 RENDERERS: dict[str, Renderer] = {
     "json": render_json,
     "md": render_markdown,
     "csv": render_csv,
     "openspec": render_openspec,
+    "html": render_html,
 }
 
 

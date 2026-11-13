@@ -74,7 +74,7 @@ def extract_command(
     exclude: Exclude = [],
     no_default_excludes: NoDefaultExcludes = False,
     output: Optional[Path] = typer.Option(None, "-o", "--output", help="Write the result here instead of stdout."),
-    fmt: str = typer.Option("json", "--format", help="Output format: json, md, csv or openspec."),
+    fmt: str = typer.Option("json", "--format", help="Output format: json, md, csv, html or openspec."),
     provider: ProviderOpt = "claude-code",
     model: Optional[str] = typer.Option(None, help="Model for synthesis and the support check."),
     fast_model: FastModel = None,
@@ -181,17 +181,20 @@ def orient_command(
 def render_command(
     file: Path = typer.Argument(..., help="A JSON result written by `reqx extract`."),
     output: Optional[Path] = typer.Option(None, "-o", "--output", help="File to write; a directory for openspec."),
-    fmt: str = typer.Option("md", "--format", help="Output format: json, md, csv or openspec."),
+    fmt: str = typer.Option("md", "--format", help="Output format: json, md, csv, html or openspec."),
     technical: bool = typer.Option(False, help="Include technical-level requirements (md)."),
     include_hidden: bool = typer.Option(False, "--include-hidden", help="csv: also list requirements rejected in review."),
     strict: Optional[bool] = typer.Option(None, "--strict/--no-strict", help="openspec: leave out requirements with "
                                           "no evidenced scenario (default: strict)."),
+    title: Optional[str] = typer.Option(None, "--title", help="html: the name shown on the page (default: the "
+                                        "name of the folder that was read)."),
 ) -> None:
     """Turn a saved JSON result into another format. No model is called."""
     _check_format(fmt, output)
     try:
         result = load_result(file)
-        rendered = render(result, fmt, include_technical=technical, include_hidden=include_hidden, strict=strict)
+        rendered = render(result, fmt, include_technical=technical, include_hidden=include_hidden, strict=strict,
+                          title=title)
         _emit_output(rendered, output)
     except (OSError, ValueError) as error:
         _say(f"error: {error}")
