@@ -19,6 +19,8 @@ class FileCoverage(BaseModel):
     observations: int = 0
     rejected: int = 0
     cited_by: int = 0   # requirements that cite this file
+    source_hash: str = ""   # the file as it was read, for files that were read
+    line_digest: str = ""   # a short digest per line, so a later run can tell which lines changed
 
 
 def file_state(observations: int, rejected: int, failed: str | None, nothing_reason: str | None) -> tuple[State, str]:

@@ -1,7 +1,7 @@
 """Carry ids forward, apply a person's decisions, and record new ones."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from reqx.modules.requirements.facade import Requirement
 from reqx.modules.review.domain import (Decision, Known, ReviewEntry, ReviewSummary, UnknownRequirement,
@@ -13,6 +13,7 @@ from reqx.modules.review.ports import ReviewStorePort
 class ReviewOutcome:
     requirements: list[Requirement]
     summary: ReviewSummary
+    hidden: list[Requirement] = field(default_factory=list)   # rejected by a person; kept, not shown
 
 
 def requirement_anchors(requirement: Requirement) -> frozenset:
@@ -36,6 +37,7 @@ def apply_review(requirements: list[Requirement], previous: list[Requirement],
     summary.new = len(requirements) - summary.carried
     matched: set[str] = set()
     out: list[Requirement] = []
+    hidden: list[Requirement] = []
     for requirement, carry in zip(requirements, carries):
         requirement = requirement.model_copy(update={"id": carry.id})
         entry = by_id.get(carry.id)
@@ -49,6 +51,7 @@ def apply_review(requirements: list[Requirement], previous: list[Requirement],
             outcome = decide(entry, requirement_anchors(requirement))
             if outcome == "rejected":
                 summary.rejected_hidden += 1
+                hidden.append(requirement)
             elif outcome == "needs_review":
                 out.append(requirement.model_copy(update={"review": "needs_review"}))
             elif outcome == "confirmed":
@@ -64,7 +67,7 @@ def apply_review(requirements: list[Requirement], previous: list[Requirement],
     summary.edited = sum(r.review == "edited" for r in out)
     summary.needs_review = sum(r.review == "needs_review" for r in out)
     summary.stale_entries = list(dict.fromkeys(e.id for e in entries if e.id not in matched))
-    return ReviewOutcome(out, summary)
+    return ReviewOutcome(out, summary, hidden)
 
 
 def record(store: ReviewStorePort, requirements: list[Requirement], requirement_id: str, decision: Decision, *,

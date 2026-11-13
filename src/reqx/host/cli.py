@@ -68,6 +68,8 @@ def extract_command(
                                           "assignment and synthesis."),
     dry_run: bool = typer.Option(False, help="List the files that would be read, and stop."),
     review: Optional[Path] = typer.Option(None, "--review", help="The review file. Default: reqx.review.yaml in PATH, if present."),
+    no_reuse: bool = typer.Option(False, "--no-reuse", help="Read every file again, even those unchanged since "
+                                  "the previous result."),
     previous: Optional[Path] = typer.Option(None, "--previous", help="An earlier JSON result whose ids to carry forward. "
                                             "Default: the -o file, if it already exists."),
 ) -> None:
@@ -89,7 +91,7 @@ def extract_command(
                     assess_support=not no_assess_support, provider=provider, fast_model=fast_model,
                     strong_model=model, concurrency=concurrency, cache_dir=cache_dir,
                     use_cache=not no_cache, replay=replay, capabilities_file=capabilities, gate=gate,
-                    review_file=review, previous=default_previous(previous, output, fmt))
+                    review_file=review, previous=default_previous(previous, output, fmt), reuse=not no_reuse)
     try:
         result = extract(path, config, progress=_say)
     except ERRORS as error:

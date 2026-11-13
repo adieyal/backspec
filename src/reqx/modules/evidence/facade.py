@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from reqx.kernel.llm import LLMPort
 from reqx.modules.discovery.facade import SourceFile
-from reqx.modules.evidence.domain import NothingFound, Observation, Rejected
-from reqx.modules.evidence.use_cases import ObservationSet, observe
+from reqx.modules.evidence.domain import Earlier, NothingFound, Observation, Rejected, line_digest
+from reqx.modules.evidence.use_cases import ObservationSet, fingerprint, observe
 
-__all__ = ["EvidenceFacade", "NothingFound", "Observation", "ObservationSet", "Rejected"]
+__all__ = ["Earlier", "EvidenceFacade", "NothingFound", "Observation", "ObservationSet", "Rejected", "line_digest"]
 
 
 class EvidenceFacade:
@@ -14,5 +14,9 @@ class EvidenceFacade:
         self._llm = llm
         self._workers = workers
 
-    def observe(self, files: list[SourceFile]) -> ObservationSet:
-        return observe(files, self._llm, self._workers)
+    def observe(self, files: list[SourceFile], earlier: dict[str, Earlier] | None = None) -> ObservationSet:
+        return observe(files, self._llm, self._workers, earlier=earlier)
+
+    def fingerprint(self) -> str:
+        """Identifies the way files are observed; earlier observations made another way are not reused."""
+        return fingerprint()

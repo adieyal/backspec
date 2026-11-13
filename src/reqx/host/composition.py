@@ -47,6 +47,7 @@ class Config:
     gate: bool = False   # write the capabilities file if there is none, and stop before assignment
     review_file: Path | None = None   # default: reqx.review.yaml under the root, used only if it exists
     previous: Path | None = None      # a saved JSON result whose ids this run carries forward
+    reuse: bool = True                # keep whatever the previous result settled and whose inputs have not changed
 
 
 def default_cache_dir(root: Path) -> Path:
@@ -89,13 +90,17 @@ def extract(path: str | Path, config: Config | None = None, progress: Progress =
     if config.review_file and not review_path.is_file():
         raise FileNotFoundError(f"review file not found: {review_path}")
     review_store = YamlReviewStore(review_path) if review_path.is_file() else None
-    previous = load_result(config.previous).requirements if config.previous else None
+    before = load_result(config.previous) if config.previous else None
+    if config.previous and root in Path(config.previous).resolve().parents:
+        # a result saved inside the repository is reqx's own output, never source to read
+        settings.exclude = [*settings.exclude, "/" + Path(config.previous).resolve().relative_to(root).as_posix()]
     return run(root=root.name, provider=name, settings=settings,
                discovery=DiscoveryFacade(DiskRepo(root)),
                evidence=EvidenceFacade(llm, config.concurrency),
                capabilities=CapabilitiesFacade(llm, config.concurrency, store),
                requirements=RequirementsFacade(llm, config.concurrency),
-               usage=llm.usage, progress=progress, review=ReviewFacade(review_store), previous=previous)
+               usage=llm.usage, progress=progress, review=ReviewFacade(review_store), before=before,
+               reuse=config.reuse)
 
 
 def status(result: ExtractionResult | str | Path, root: str | Path = ".") -> StatusReport:
