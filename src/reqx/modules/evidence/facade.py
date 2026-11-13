@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from reqx.kernel.llm import LLMPort
 from reqx.modules.discovery.facade import SourceFile
-from reqx.modules.evidence.domain import Earlier, NothingFound, Observation, Rejected
+from reqx.modules.evidence.domain import Earlier, NothingFound, Observation, Rejected, line_digest
 from reqx.modules.evidence.use_cases import ObservationSet, fingerprint, observe
 
-__all__ = ["Earlier", "EvidenceFacade", "NothingFound", "Observation", "ObservationSet", "Rejected"]
+__all__ = ["Earlier", "EvidenceFacade", "NothingFound", "Observation", "ObservationSet", "Rejected", "line_digest"]
 
 
 class EvidenceFacade:

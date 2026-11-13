@@ -48,7 +48,8 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
     earlier = earlier_evidence(kept, evidence.fingerprint()) if kept else None
     observed = evidence.observe(list(found.files), earlier)
     progress(f"observed {len(observed.observations)} verified, {len(observed.rejected)} rejected, "
-             f"in {observed.batches} batches; {observed.reused_files} unchanged files reused")
+             f"in {observed.batches} batches; {observed.reused_files} unchanged files reused, "
+             f"{observed.partly_read_files} changed files read in part")
 
     caps: list[Capability] = []
     assignments: dict[str, str] = {}
@@ -71,7 +72,7 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         return Run(status=status, tool_version=TOOL_VERSION, prompt_version=PROMPT_VERSION, provider=provider,
                    root=root, calls=calls, cached_calls=cached, capabilities_source=source,
                    observe_fingerprint=evidence.fingerprint(), reused_files=observed.reused_files,
-                   synthesis_fingerprint=requirements.fingerprint(), **more)
+                   partly_read_files=observed.partly_read_files, synthesis_fingerprint=requirements.fingerprint(), **more)
 
     all_observations = sorted(observed.observations, key=lambda o: (o.path, o.lines[0], o.id))
     if settings.gate:
@@ -96,6 +97,7 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
     # A capability whose observations are exactly those the previous result had keeps its requirements.
     reused: list[Requirement] = []
     reused_capabilities: list[str] = []
+    current = {o.id: o for o in observed.observations}
     open_questions: dict[str, list[str]] = {}
     if kept and kept.run.stopped_after is None and kept.run.synthesis_fingerprint == requirements.fingerprint():
         placed_before = collections.defaultdict(set)
@@ -110,7 +112,7 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
             if now and now == placed_before.get(capability.id) and capability.id not in unsettled:
                 reused_capabilities.append(capability.id)
                 # review is applied afresh below, so a decision withdrawn since then is withdrawn here too
-                reused += [r.model_copy(update={"review": "unreviewed"}) for r in made_before[capability.id]]
+                reused += [_refreshed(r, current) for r in made_before[capability.id]]
                 if capability.id in kept.diagnostics.open_questions:
                     open_questions[capability.id] = kept.diagnostics.open_questions[capability.id]
     synthesis = requirements.synthesise([c for c in product if c.id not in reused_capabilities], by_capability)
@@ -145,6 +147,15 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         diagnostics=Diagnostics(rejected=observed.rejected, failed_capabilities=synthesis.failed,
                                 unconsolidated=synthesis.unconsolidated, open_questions=open_questions,
                                 review=review_summary))
+
+
+def _refreshed(requirement: Requirement, current: dict) -> Requirement:
+    """A kept requirement with its evidence pointing at where the cited code is now. The lines
+    may have moved since it was written; the cited text has not changed."""
+    evidence = [e.model_copy(update={"path": current[e.observation].path, "lines": current[e.observation].lines,
+                                     "quote": current[e.observation].quote})
+                if e.observation in current else e for e in requirement.evidence]
+    return requirement.model_copy(update={"review": "unreviewed", "evidence": evidence})
 
 
 def orient_only(settings: Settings, discovery: DiscoveryFacade, evidence: EvidenceFacade,

@@ -14,7 +14,7 @@ from reqx.kernel.llm import LLMError, LLMPort, LLMRequest, ask
 from reqx.modules.discovery.facade import SourceFile
 from reqx.kernel.text import short_hash
 from reqx.modules.evidence.domain import (Chunk, Earlier, NothingFound, Observation, ObserveReply, Rejected,
-                                          pack, render, split_file, verify)
+                                          carried, compare, pack, render, split_file, verify, windows)
 
 BATCH_LINES = 1300
 
@@ -27,12 +27,14 @@ class ObservationSet:
     failed: dict[str, str] = field(default_factory=dict)   # path -> why its batch failed
     batches: int = 0
     reused_files: int = 0   # unchanged since the earlier run, so not read again
+    partly_read_files: int = 0   # changed since the earlier run: only the changed parts were read
+    outside_change: int = 0      # observations a model made of unchanged lines while reading a change; not kept
 
 
 def fingerprint(batch_lines: int = BATCH_LINES) -> str:
     """Changes whenever the way files are observed does. Earlier observations made another way
     are not reused."""
-    return short_hash(prompts.load("observe"), batch_lines)
+    return short_hash(prompts.load("observe"), batch_lines, "ids-by-cited-text")
 
 
 def observe(files: list[SourceFile], llm: LLMPort, workers: int = 4, batch_lines: int = BATCH_LINES,
@@ -42,10 +44,29 @@ def observe(files: list[SourceFile], llm: LLMPort, workers: int = 4, batch_lines
     result = ObservationSet()
     seen: set[str] = set()
     to_read = []
+    partial: list[Chunk] = []
+    changes = {}
     for f in files:
         known = (earlier or {}).get(f.path)
-        if known is None or known.source_hash != f.source_hash:
+        if known is None:
             to_read.append(f)
+            continue
+        if known.source_hash != f.source_hash:
+            if not known.line_digest:
+                to_read.append(f)
+                continue
+            # Changed since the earlier run. Observations whose lines are untouched stay, moved to
+            # where those lines are now; only the changed parts, with context, are read again.
+            change = compare(known.line_digest, f.lines)
+            result.partly_read_files += 1
+            for observation in known.observations:
+                still = carried(observation, change, f.source_hash)
+                if still is not None and still.id not in seen:
+                    seen.add(still.id)
+                    result.observations.append(still)
+            for first, last in windows(change.changed, len(f.lines)):
+                partial.append(Chunk(f.path, first, tuple(f.lines[first - 1:last])))
+            changes[f.path] = change
             continue
         result.reused_files += 1
         for observation in known.observations:
@@ -54,7 +75,7 @@ def observe(files: list[SourceFile], llm: LLMPort, workers: int = 4, batch_lines
                 result.observations.append(observation)
         if known.nothing_reason is not None and not known.observations:
             result.nothing.append(NothingFound(path=f.path, reason=known.nothing_reason))
-    chunks = [chunk for f in to_read for chunk in split_file(f.path, f.lines, batch_lines)]
+    chunks = [chunk for f in to_read for chunk in split_file(f.path, f.lines, batch_lines)] + partial
     batches = pack(chunks, batch_lines)
     result.batches = len(batches)
     instructions = prompts.load("observe")
@@ -78,6 +99,9 @@ def observe(files: list[SourceFile], llm: LLMPort, workers: int = 4, batch_lines
             checked = verify(raw, shown, file_lines, hashes)
             if isinstance(checked, Rejected):
                 result.rejected.append(checked)
+            elif checked.path in changes and not changes[checked.path].touches(*checked.lines):
+                # Read only as context for a change. What the earlier run said of these lines stands.
+                result.outside_change += 1
             elif checked.id not in seen:
                 seen.add(checked.id)
                 result.observations.append(checked)

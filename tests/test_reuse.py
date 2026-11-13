@@ -110,13 +110,72 @@ def test_a_run_with_nothing_changed_calls_no_model_and_returns_the_same_requirem
 def test_a_capability_whose_evidence_changed_is_written_again(tmp_path):
     root = repo(tmp_path)
     first = extract(root, Config(provider=fake(), use_cache=False))
-    (root / "src" / "service.py").write_text(SERVICE + "\n# a new comment\n")
+    (root / "src" / "service.py").write_text(SERVICE.replace("delta < 0", "delta < 1"))   # a cited line changes
     llm = rewording_llm()
     second = extract(root, Config(provider=llm, use_cache=False, previous=saved(tmp_path, first)))
     assert "synthesise" in stages(llm) and "orient" not in stages(llm)
     assert second.run.reused_capabilities == []
     assert second.requirements[0].statement == "Managers may correct stock levels."
     assert second.requirements[0].id == first.requirements[0].id   # the id is still carried by its evidence
+    changed = {o.statement: o.id for o in second.observations}
+    before = {o.statement: o.id for o in first.observations}
+    assert changed["Only a manager may adjust stock."] == before["Only a manager may adjust stock."]
+    refused = "An adjustment that would make stock negative is refused."
+    assert changed[refused] != before[refused]   # its cited text is different now
+
+
+def test_an_edit_away_from_the_cited_lines_changes_no_observation_and_rewrites_nothing(tmp_path):
+    root = repo(tmp_path)
+    first = extract(root, Config(provider=fake(), use_cache=False))
+    (root / "src" / "service.py").write_text(SERVICE + "\n# a new comment\n")
+    llm = rewording_llm()
+    second = extract(root, Config(provider=llm, use_cache=False, previous=saved(tmp_path, first)))
+    assert stages(llm) == ["observe"]   # the changed lines are read; nothing is written again
+    assert [o.id for o in second.observations] == [o.id for o in first.observations]
+    assert second.run.partly_read_files == 1 and second.run.reused_capabilities == ["stock"]
+    assert [(r.id, r.statement) for r in second.requirements] == [(r.id, r.statement) for r in first.requirements]
+
+
+def test_code_that_moved_keeps_its_observations_and_citations_follow_it(tmp_path):
+    root = repo(tmp_path)
+    first = extract(root, Config(provider=fake(), use_cache=False))
+    (root / "src" / "service.py").write_text("import logging\n\n\n" + SERVICE)
+    second = extract(root, Config(provider=fake(), use_cache=False, previous=saved(tmp_path, first)))
+    was = next(o for o in first.observations if o.path == "src/service.py")
+    now = next(o for o in second.observations if o.path == "src/service.py")
+    assert now.id == was.id and now.lines == (was.lines[0] + 3, was.lines[1] + 3)
+    assert now.source_hash != was.source_hash
+    cited = next(e for e in second.requirements[0].evidence if e.path == "src/service.py")
+    assert cited.lines == now.lines   # the kept requirement points at where the code is now
+    assert second.requirements[0].id == first.requirements[0].id and second.run.reused_capabilities == ["stock"]
+    from reqx import status
+    assert status(second, root).all_current
+
+
+def test_what_a_model_says_of_unchanged_lines_while_reading_a_change_is_not_kept(tmp_path):
+    root = repo(tmp_path)
+    first = extract(root, Config(provider=fake(), use_cache=False))
+    (root / "src" / "service.py").write_text(SERVICE + "\n# a new comment\n")
+
+    def chatty(prompt):
+        return {"observations": [{"path": "src/service.py", "lines": [4, 4], "quote": "item.quantity += delta",
+                                  "kind": "state_change", "statement": "Stock is changed by the delta."}]}
+    llm = FakeLLM({"observe": chatty, "orient": orient, "assign": assign, "synthesise": synthesise, "assess": assess})
+    second = extract(root, Config(provider=llm, use_cache=False, previous=saved(tmp_path, first)))
+    assert "Stock is changed by the delta." not in {o.statement for o in second.observations}
+    assert [o.id for o in second.observations] == [o.id for o in first.observations]
+
+
+def test_a_changed_file_is_read_whole_when_the_previous_result_kept_no_line_digest(tmp_path):
+    root = repo(tmp_path)
+    first = extract(root, Config(provider=fake(), use_cache=False))
+    for covered in first.coverage.files:
+        covered.line_digest = ""
+    (root / "src" / "service.py").write_text(SERVICE + "\n# a new comment\n")
+    llm = fake()
+    second = extract(root, Config(provider=llm, use_cache=False, previous=saved(tmp_path, first)))
+    prompt = next(r.prompt for r in llm.requests if r.stage == "observe")
+    assert "=== FILE: src/service.py (lines 1-7) ===" in prompt and second.run.partly_read_files == 0
 
 
 def test_requirements_written_another_way_are_not_reused(tmp_path, monkeypatch):

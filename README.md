@@ -88,12 +88,14 @@ is new. When a previous result is available (`--previous FILE`, or the `-o` file
 exists):
 
 - a file that has not changed keeps the observations that result made of it and is not read again;
+- in a file that has changed, only the changed lines are read again, with some context; an
+  observation whose cited lines are untouched stays, and its citation moves with the code;
 - the capabilities are the previous ones, unless there is a capabilities file;
 - an observation already placed in a capability stays there;
 - a capability whose observations are all the same keeps its requirements and their support verdicts.
 
-A run with nothing changed calls no model and returns the same requirements. A change to one
-file re-reads that file and rewrites only the capabilities it feeds. Anything made with a
+A run with nothing changed calls no model and returns the same requirements. An edit rewrites
+only the capabilities whose cited code it touched. Anything made with a
 different prompt is not reused, and `--no-reuse` starts from nothing.
 
 A requirement rejected in review is left out of `requirements` and kept under `hidden`.

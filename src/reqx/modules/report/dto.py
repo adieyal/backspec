@@ -25,6 +25,7 @@ class Run(BaseModel):
     capabilities_source: Literal["file", "oriented", "previous"] = "oriented"
     observe_fingerprint: str = ""   # how files were observed; a later run reuses observations only if it matches
     reused_files: int = 0           # files unchanged since the previous result, not read again
+    partly_read_files: int = 0      # files changed since the previous result: only the changed parts were read
     synthesis_fingerprint: str = ""  # how requirements were written and judged
     reused_capabilities: list[str] = Field(default_factory=list)   # evidence unchanged, requirements kept
     stopped_after: Literal["capabilities"] | None = None   # set when a gated run stopped early

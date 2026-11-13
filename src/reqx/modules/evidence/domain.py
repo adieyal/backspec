@@ -6,6 +6,8 @@ the range is then moved (repaired). Anything else is rejected and recorded.
 """
 from __future__ import annotations
 
+import difflib
+import hashlib
 import re
 from dataclasses import dataclass
 from typing import Literal
@@ -67,6 +69,7 @@ class Earlier:
     source_hash: str
     observations: tuple["Observation", ...]
     nothing_reason: str | None = None
+    line_digest: str = ""   # the file line by line, to find what changed since; empty if not recorded
 
 
 class Rejected(BaseModel):
@@ -119,6 +122,73 @@ def render(batch: list[Chunk]) -> str:
     return "\n".join(out)
 
 
+DIGEST_WIDTH = 6      # characters of digest kept for each line
+CONTEXT_AROUND_CHANGE = 30
+
+
+def observation_id(path: str, cited_lines: list[str], statement: str) -> str:
+    """An id that depends on the cited text, not on where it sits. Moving the code keeps the id;
+    changing the cited lines changes it."""
+    return "OBS-" + short_hash(path, squash("\n".join(cited_lines)), statement.strip())
+
+
+def line_digest(lines: list[str]) -> str:
+    """The file as one short digest per line, enough to tell later which lines changed."""
+    return "".join(hashlib.sha1(squash(line).encode()).hexdigest()[:DIGEST_WIDTH] for line in lines)
+
+
+@dataclass(frozen=True)
+class Change:
+    """How a file differs from the one an earlier run read. `kept` are runs of lines that are the
+    same, as (old first line, new first line, length). `changed` are the new or altered line
+    ranges in the file as it is now."""
+    kept: tuple[tuple[int, int, int], ...]
+    changed: tuple[tuple[int, int], ...]
+
+    def moved(self, first: int, last: int) -> tuple[int, int] | None:
+        """Where an old line range is now, if every line of it is unchanged."""
+        for old, new, length in self.kept:
+            if old <= first and last < old + length:
+                return first - old + new, last - old + new
+        return None
+
+    def touches(self, first: int, last: int) -> bool:
+        return any(a <= last and first <= b for a, b in self.changed)
+
+
+def compare(old_digest: str, new_lines: list[str]) -> Change:
+    old = [old_digest[i:i + DIGEST_WIDTH] for i in range(0, len(old_digest), DIGEST_WIDTH)]
+    digest = line_digest(new_lines)
+    new = [digest[i:i + DIGEST_WIDTH] for i in range(0, len(digest), DIGEST_WIDTH)]
+    kept, changed = [], []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=old, b=new, autojunk=False).get_opcodes():
+        if tag == "equal":
+            kept.append((i1 + 1, j1 + 1, i2 - i1))
+        elif j2 > j1:
+            changed.append((j1 + 1, j2))
+    return Change(tuple(kept), tuple(changed))
+
+
+def windows(changed: tuple[tuple[int, int], ...], total: int, context: int = CONTEXT_AROUND_CHANGE) -> list[tuple[int, int]]:
+    """The line ranges to show a model: each change with context either side, overlaps merged."""
+    out: list[list[int]] = []
+    for first, last in changed:
+        a, b = max(1, first - context), min(total, last + context)
+        if out and a <= out[-1][1] + 1:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [(a, b) for a, b in out]
+
+
+def carried(observation: "Observation", change: Change, source_hash: str) -> "Observation | None":
+    """An earlier observation as it stands in the changed file, or None if its lines changed."""
+    where = change.moved(*observation.lines)
+    if where is None:
+        return None
+    return observation.model_copy(update={"lines": where, "source_hash": source_hash})
+
+
 def _clean(quote: str) -> str:
     """A quote without the `  123| ` prefix a model sometimes copies along with the line."""
     return squash(re.sub(r"^\s*\d+\|\s?", "", quote))
@@ -150,6 +220,6 @@ def verify(raw: RawObservation, shown: set[str], file_lines: dict[str, list[str]
         first = max(1, hits[0] - width // 2)
         verdict, where = "repaired", (first, min(len(lines), first + width))
     return Observation(
-        id="OBS-" + short_hash(source_hashes[raw.path], where, raw.statement),
+        id=observation_id(raw.path, lines[where[0] - 1:where[1]], raw.statement),
         statement=raw.statement.strip(), kind=raw.kind, path=raw.path, lines=where,
         quote=_clean(raw.quote), source_hash=source_hashes[raw.path], verified=verdict)

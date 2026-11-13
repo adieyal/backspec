@@ -4,7 +4,7 @@ from __future__ import annotations
 import collections
 
 from reqx.modules.discovery.facade import Discovery
-from reqx.modules.evidence.facade import Earlier, ObservationSet
+from reqx.modules.evidence.facade import Earlier, ObservationSet, line_digest
 from reqx.modules.report.domain import FileCoverage, file_state
 from reqx.modules.report.dto import Coverage, ExtractionResult
 from reqx.modules.requirements.facade import Requirement
@@ -22,7 +22,7 @@ def build_coverage(discovery: Discovery, observed: ObservationSet, requirements:
                                    observed.failed.get(source.path), nothing.get(source.path))
         files.append(FileCoverage(path=source.path, state=state, reason=reason, observations=per_file[source.path],
                                   rejected=rejected[source.path], cited_by=cited[source.path],
-                                  source_hash=source.source_hash))
+                                  source_hash=source.source_hash, line_digest=line_digest(source.lines)))
     files.sort(key=lambda f: f.path)
     used = {e.observation for r in requirements for e in r.evidence}
     unused = collections.Counter(assignments.get(o.id, "unassigned") for o in observed.observations if o.id not in used)
@@ -43,7 +43,8 @@ def earlier_evidence(previous: ExtractionResult, fingerprint: str) -> dict[str, 
         if covered.source_hash and covered.state in ("extracted", "no_requirements"):
             earlier[covered.path] = Earlier(
                 source_hash=covered.source_hash, observations=tuple(by_path.get(covered.path, [])),
-                nothing_reason=covered.reason if covered.state == "no_requirements" else None)
+                nothing_reason=covered.reason if covered.state == "no_requirements" else None,
+                line_digest=covered.line_digest)
     return earlier
 
 
