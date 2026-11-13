@@ -95,6 +95,8 @@ def extract_command(
     include_hidden: bool = typer.Option(False, "--include-hidden", help="csv: also list requirements rejected in review."),
     strict: Optional[bool] = typer.Option(None, "--strict/--no-strict", help="openspec: leave out requirements with "
                                           "no evidenced scenario (default: strict)."),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", min=1, help="Stop sending model calls once this "
+                                             "many tokens are used or reserved. The run is then partial."),
 ) -> None:
     """Run the pipeline on PATH."""
     _check_format(fmt, output)
@@ -106,14 +108,17 @@ def extract_command(
             typer.echo(f"read      {source.path}")
         for left in found.left:
             typer.echo(f"{left.state:9s} {left.path}  ({left.reason})")
+        tokens = sum(len("\n".join(f.lines)) for f in found.files) // 4
         _say(f"{len(found.files)} files, {lines} lines to read; {len(found.left)} left out. "
-             f"About {max(1, lines // 1300)} observe calls. Nothing was sent to a model.")
+             f"About {max(1, lines // 1300)} observe calls, about {tokens} tokens to read (estimated, "
+             f"characters / 4). Nothing was sent to a model.")
         raise typer.Exit(0)
     config = Config(include=include, exclude=exclude, default_excludes=not no_default_excludes,
                     assess_support=not no_assess_support, provider=provider, fast_model=fast_model,
                     strong_model=model, concurrency=concurrency, cache_dir=cache_dir,
                     use_cache=not no_cache, replay=replay, capabilities_file=capabilities, gate=gate,
-                    review_file=review, previous=default_previous(previous, output, fmt), reuse=not no_reuse)
+                    review_file=review, previous=default_previous(previous, output, fmt), reuse=not no_reuse,
+                    max_tokens=max_tokens)
     try:
         result = extract(path, config, progress=_say)
     except ERRORS as error:
@@ -121,7 +126,12 @@ def extract_command(
         raise typer.Exit(2)
     _emit_output(render(result, fmt, include_hidden=include_hidden, strict=strict), output)
     _say(f"{len(result.requirements)} requirements; {result.run.calls} model calls, "
-         f"{result.run.cached_calls} from cache; status {result.run.status}")
+         f"{result.run.cached_calls} from cache; "
+         f"{result.run.input_tokens} tokens in, {result.run.output_tokens} out"
+         f"{' (estimated)' if result.run.tokens_estimated else ''}; status {result.run.status}")
+    if result.run.budget_reached:
+        _say(f"token budget reached: {result.run.input_tokens + result.run.output_tokens} tokens used "
+             f"(limit {max_tokens}); some calls were not sent and the result is partial")
     if result.run.stopped_after:
         _say(f"stopped after {result.run.stopped_after}, as asked by --gate")
         raise typer.Exit(0)

@@ -36,6 +36,18 @@ for each) is refused with every problem listed. `plumbing` is added if it is mis
 observation belongs to which capability is not stored; it is redone on each run. A gated run
 returns no requirements, with `run.status` `partial` and `run.stopped_after` `capabilities`.
 
+A run reports its tokens (`run.input_tokens`, `run.output_tokens`, and `run.usage_by_stage`).
+A backend that reports usage is used as it is; otherwise tokens are estimated as characters / 4
+and `run.tokens_estimated` is true. Cached replies count as zero tokens. `--dry-run` prints an
+estimate of the tokens the observe stage would read. `--max-tokens N` is a soft budget: a call is
+not sent if the tokens already used, plus those reserved for calls in flight, plus its own
+estimated cost would pass N. The run is then `partial` with `run.budget_reached` true, and exits 1.
+A run can overshoot N by the amount the calls in flight turned out dearer than estimated.
+
+```bash
+reqx extract ./repo --max-tokens 400000
+```
+
 ```bash
 reqx render reqs.json -o REQUIREMENTS.md
 reqx render reqs.json --format csv -o reqs.csv            # one row per requirement and evidence pair
@@ -178,5 +190,5 @@ python3 -m pytest -q
 ## Not built yet
 
 Triage, the
-triage audit, tree-sitter, token budgets, and the HTML renderer. The Codex adapter exists but is
-unverified against the real CLI. See the spec.
+triage audit, tree-sitter, and the HTML renderer. The Codex adapter exists but is unverified
+against the real CLI. See the spec.

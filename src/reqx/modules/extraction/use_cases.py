@@ -9,12 +9,14 @@ import collections
 from dataclasses import dataclass, field
 from typing import Callable
 
+from reqx.kernel.llm import LLMError
 from reqx.kernel.prompts import PROMPT_VERSION
+from reqx.kernel.usage import Spend
 from reqx.modules.capabilities.facade import PLUMBING, UNASSIGNED, CapabilitiesFacade, Capability
 from reqx.modules.discovery.facade import DiscoveryFacade
 from reqx.modules.evidence.facade import EvidenceFacade
 from reqx.modules.lint.facade import lint_findings
-from reqx.modules.report.facade import Diagnostics, ExtractionResult, Run, build_coverage, earlier_evidence
+from reqx.modules.report.facade import Diagnostics, ExtractionResult, Run, StageUsage, build_coverage, earlier_evidence
 from reqx.modules.requirements.facade import Requirement, RequirementsFacade
 from reqx.modules.review.facade import ReviewFacade, ReviewSummary
 
@@ -35,7 +37,7 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         capabilities: CapabilitiesFacade, requirements: RequirementsFacade,
         usage: Callable[[], tuple[int, int]] = lambda: (0, 0), progress: Progress = lambda _: None,
         review: ReviewFacade | None = None, before: ExtractionResult | None = None,
-        reuse: bool = True) -> ExtractionResult:
+        reuse: bool = True, spend: Callable[[], Spend] = Spend) -> ExtractionResult:
     """`before` is the previous result, if there is one. Requirement ids are carried forward from
     it, and with `reuse` so is everything whose inputs have not changed: observations of unchanged
     files, the capabilities, where each observation was placed, and the requirements of any
@@ -55,6 +57,7 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
     caps: list[Capability] = []
     assignments: dict[str, str] = {}
     source = "oriented"
+    orient_failed = ""
     if from_file is not None:
         caps, source = from_file, "file"
         progress(f"using {len(caps)} capabilities from {capabilities.location}")
@@ -62,20 +65,33 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         caps, source = [c for c in kept.capabilities if c.id != UNASSIGNED], "previous"
         progress(f"using {len(caps)} capabilities from the previous result")
     elif observed.observations:
-        caps = capabilities.orient(observed.observations)
-        progress(f"oriented into {len(caps)} capabilities")
-        if settings.gate:
-            capabilities.save(caps)
-            progress(f"capabilities written to {capabilities.location}")
+        try:
+            caps = capabilities.orient(observed.observations)
+            progress(f"oriented into {len(caps)} capabilities")
+            if settings.gate:
+                capabilities.save(caps)
+                progress(f"capabilities written to {capabilities.location}")
+        except LLMError as error:   # nothing can be placed without capabilities: record it and stop
+            orient_failed = str(error)[:300]
 
     def describe(status: str, **more: object) -> Run:
         calls, cached = usage()
+        used = spend()
         return Run(status=status, tool_version=TOOL_VERSION, prompt_version=PROMPT_VERSION, provider=provider,
                    root=root, calls=calls, cached_calls=cached, capabilities_source=source,
                    observe_fingerprint=evidence.fingerprint(), reused_files=observed.reused_files,
+                   input_tokens=used.input_tokens, output_tokens=used.output_tokens,
+                   tokens_estimated=used.estimated, cost_usd=used.cost_usd, budget_reached=used.budget_reached,
+                   usage_by_stage={s: StageUsage(**u) for s, u in used.by_stage.items()},
                    partly_read_files=observed.partly_read_files, synthesis_fingerprint=requirements.fingerprint(), **more)
 
     all_observations = sorted(observed.observations, key=lambda o: (o.path, o.lines[0], o.id))
+    if orient_failed:
+        progress(f"orient failed: {orient_failed}")
+        return ExtractionResult(
+            run=describe("partial"), capabilities=[], requirements=[], observations=all_observations,
+            assignments={}, coverage=build_coverage(found, observed, [], {}),
+            diagnostics=Diagnostics(rejected=observed.rejected, failed_stages={"orient": orient_failed}))
     if settings.gate:
         # Stopped on purpose: the run is `partial` and says where it stopped.
         progress("gate: stopping before assignment and synthesis; edit the file, then run again")
@@ -141,7 +157,7 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
                  f"{review_summary.needs_review} need review, {len(review_summary.stale_entries)} stale entries")
     final = sorted(final, key=lambda r: (r.capability, r.id))
 
-    complete = not observed.failed and not synthesis.failed
+    complete = not observed.failed and not synthesis.failed and not spend().budget_reached
     result = ExtractionResult(
         run=describe("complete" if complete else "partial", reused_capabilities=sorted(reused_capabilities)),
         capabilities=caps, requirements=final, hidden=sorted(hidden, key=lambda r: (r.capability, r.id)),

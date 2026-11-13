@@ -50,6 +50,7 @@ class Config:
     gate: bool = False   # write the capabilities file if there is none, and stop before assignment
     review_file: Path | None = None   # default: reqx.review.yaml under the root, used only if it exists
     previous: Path | None = None      # a saved JSON result whose ids this run carries forward
+    max_tokens: int | None = None     # stop sending calls once this many tokens are spent or reserved
     reuse: bool = True                # keep whatever the previous result settled and whose inputs have not changed
 
 
@@ -76,7 +77,7 @@ def _wiring(path: str | Path, config: Config):
         raise NotADirectoryError(f"{root} is not a directory")
     inner, name = _provider(config)
     directory = (config.cache_dir or default_cache_dir(root)) if config.use_cache else None
-    llm = CachedLLM(inner, directory, config.replay)
+    llm = CachedLLM(inner, directory, config.replay, config.max_tokens)
     settings = Settings(include=config.include, exclude=config.exclude, default_excludes=config.default_excludes,
                         assess_support=config.assess_support, gate=config.gate)
     store = YamlCapabilitiesFile(config.capabilities_file or root / CAPABILITIES_FILE)
@@ -104,7 +105,7 @@ def extract(path: str | Path, config: Config | None = None, progress: Progress =
                evidence=EvidenceFacade(llm, config.concurrency),
                capabilities=CapabilitiesFacade(llm, config.concurrency, store),
                requirements=RequirementsFacade(llm, config.concurrency),
-               usage=llm.usage, progress=progress, review=ReviewFacade(review_store), before=before,
+               usage=llm.usage, spend=llm.spend, progress=progress, review=ReviewFacade(review_store), before=before,
                reuse=config.reuse)
 
 

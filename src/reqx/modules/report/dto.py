@@ -15,6 +15,13 @@ from reqx.modules.review.facade import ReviewSummary
 SCHEMA_VERSION = "0.1"
 
 
+class StageUsage(BaseModel):
+    calls: int = 0    # replies the model produced
+    cached: int = 0   # replies served from the cache: they cost nothing
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
 class Run(BaseModel):
     status: Literal["complete", "partial"]
     tool_version: str
@@ -30,6 +37,12 @@ class Run(BaseModel):
     synthesis_fingerprint: str = ""  # how requirements were written and judged
     reused_capabilities: list[str] = Field(default_factory=list)   # evidence unchanged, requirements kept
     stopped_after: Literal["capabilities"] | None = None   # set when a gated run stopped early
+    input_tokens: int = 0
+    output_tokens: int = 0
+    tokens_estimated: bool = False   # true if any call's tokens were estimated, not reported
+    cost_usd: float | None = None    # the backend's own cost figure, summed, when it reports one
+    usage_by_stage: dict[str, StageUsage] = Field(default_factory=dict)
+    budget_reached: bool = False     # a call was not sent because the token budget was reached
 
 
 class Coverage(BaseModel):
@@ -46,6 +59,7 @@ class Diagnostics(BaseModel):
     open_questions: dict[str, list[str]] = Field(default_factory=dict)
     review: ReviewSummary | None = None   # set when ids were carried forward or a review file applied
     lint: list[Finding] = Field(default_factory=list)   # deterministic checks on the finished result
+    failed_stages: dict[str, str] = Field(default_factory=dict)   # a stage the whole run depends on -> why it failed
 
 
 class ExtractionResult(BaseModel):
