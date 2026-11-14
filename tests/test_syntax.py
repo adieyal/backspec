@@ -1,5 +1,5 @@
 """Optional syntax support: symbols from a parser decide where files are cut and where an
-observation sits. With no parser, or `--text-only`, reqx reads everything as text, as before.
+observation sits. With no parser, or `--text-only`, backspec reads everything as text, as before.
 
 Tests that need the real parser are skipped when the package is absent; the rest use a fake
 `SyntaxPort` built on the standard library's `ast`, so they run either way."""
@@ -10,13 +10,13 @@ import sys
 import pytest
 from test_pipeline import assess, assign, fake, observe, orient, repo, synthesise
 
-from reqx import Config, extract, to_markdown
-from reqx.host import composition
-from reqx.host.adapters.fake import FakeLLM
-from reqx.host.adapters.treesitter import TreeSitterSyntax
-from reqx.host.cli import app
-from reqx.modules.evidence.domain import Symbol, enclosing_symbol, split_file
-from reqx.modules.evidence.facade import EvidenceFacade
+from backspec import Config, extract, to_markdown
+from backspec.host import composition
+from backspec.host.adapters.fake import FakeLLM
+from backspec.host.adapters.treesitter import TreeSitterSyntax
+from backspec.host.cli import app
+from backspec.modules.evidence.domain import Symbol, enclosing_symbol, split_file
+from backspec.modules.evidence.facade import EvidenceFacade
 
 
 class AstSyntax:
@@ -60,8 +60,8 @@ def use(monkeypatch, port):
 
 def real():
     pytest.importorskip("tree_sitter_language_pack")
-    if os.environ.get("REQX_NO_TREESITTER"):
-        pytest.skip("REQX_NO_TREESITTER switches the adapter off")
+    if os.environ.get("BACKSPEC_NO_TREESITTER"):
+        pytest.skip("BACKSPEC_NO_TREESITTER switches the adapter off")
     adapter = TreeSitterSyntax.load()
     assert adapter is not None
     return adapter
@@ -118,7 +118,7 @@ def test_without_the_package_there_is_no_adapter(monkeypatch):
 
 
 def test_the_environment_variable_also_switches_the_adapter_off(monkeypatch):
-    monkeypatch.setenv("REQX_NO_TREESITTER", "1")
+    monkeypatch.setenv("BACKSPEC_NO_TREESITTER", "1")
     assert TreeSitterSyntax.load() is None
 
 
@@ -271,8 +271,8 @@ def test_text_only_wins_even_when_the_parser_is_there(tmp_path, monkeypatch):
 def test_the_text_only_flag_reaches_the_config(tmp_path, monkeypatch):
     from typer.testing import CliRunner
     seen = []
-    monkeypatch.setattr("reqx.host.cli.extract", lambda path, config, progress=None: seen.append(config.syntax) or (_ for _ in ()).throw(FileNotFoundError("stop")))
-    monkeypatch.setattr("reqx.host.cli.ERRORS", (FileNotFoundError,))
+    monkeypatch.setattr("backspec.host.cli.extract", lambda path, config, progress=None: seen.append(config.syntax) or (_ for _ in ()).throw(FileNotFoundError("stop")))
+    monkeypatch.setattr("backspec.host.cli.ERRORS", (FileNotFoundError,))
     CliRunner().invoke(app, ["extract", str(tmp_path), "--text-only"])
     CliRunner().invoke(app, ["extract", str(tmp_path)])
     assert seen == [False, True]
@@ -334,8 +334,8 @@ def test_a_reused_requirement_gets_its_evidence_symbol_refreshed(tmp_path, monke
 
 def test_a_large_file_reaches_the_model_cut_between_functions():
     import re
-    from reqx.modules.discovery.facade import SourceFile
-    from reqx.modules.evidence.use_cases import observe as observe_files
+    from backspec.modules.discovery.facade import SourceFile
+    from backspec.modules.evidence.use_cases import observe as observe_files
     lines, symbols = long_file(functions=60)
     llm = FakeLLM({"observe": lambda prompt: {"observations": [], "none": []}})
     text = "\n".join(lines)

@@ -1,11 +1,11 @@
-"""Lint: deterministic checks on a result, `reqx validate`, and lint stored by every extraction."""
+"""Lint: deterministic checks on a result, `backspec validate`, and lint stored by every extraction."""
 import json
 
 from typer.testing import CliRunner
 
-from reqx import Finding, validate
-from reqx.host.cli import app
-from reqx.modules.report.facade import ExtractionResult
+from backspec import Finding, validate
+from backspec.host.cli import app
+from backspec.modules.report.facade import ExtractionResult
 from test_pipeline import run
 
 

@@ -4,9 +4,9 @@ import re
 
 from typer.testing import CliRunner
 
-from reqx.host.cli import app
-from reqx.host.composition import Config, extract
-from reqx.modules.report.facade import formats, render
+from backspec.host.cli import app
+from backspec.host.composition import Config, extract
+from backspec.modules.report.facade import formats, render
 from tests.test_pipeline import fake, repo
 
 
@@ -17,7 +17,7 @@ def result_of(tmp_path):
 
 
 def embedded(page: str) -> dict:
-    return json.loads(re.search(r'<script type="application/json" id="reqx-data">(.*?)</script>', page, re.S).group(1))
+    return json.loads(re.search(r'<script type="application/json" id="backspec-data">(.*?)</script>', page, re.S).group(1))
 
 
 def test_html_is_a_known_format():

@@ -1,9 +1,9 @@
-"""`reqx cache info` and `reqx cache clear`."""
+"""`backspec cache info` and `backspec cache clear`."""
 from typer.testing import CliRunner
 
-from reqx import Config, extract
-from reqx.host.cli import app
-from reqx.host.composition import default_cache_dir
+from backspec import Config, extract
+from backspec.host.cli import app
+from backspec.host.composition import default_cache_dir
 from test_pipeline import fake, repo
 
 HEX = "0123456789abcdef0123456789abcdef"
@@ -68,7 +68,7 @@ def test_a_directory_that_is_not_a_cache_is_refused_and_left_alone(tmp_path):
     (folder / f"observe-{HEX}.json").write_text("{}")
     for command in (("info",), ("clear", "--yes")):
         done = cli(*command, str(tmp_path), "--cache-dir", str(folder))
-        assert done.exit_code == 2 and "does not look like a reqx cache" in done.output
+        assert done.exit_code == 2 and "does not look like a backspec cache" in done.output
     assert sorted(p.name for p in folder.iterdir()) == ["notes.txt", f"observe-{HEX}.json"]
 
 

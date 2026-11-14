@@ -1,11 +1,11 @@
 """The consolidation pass: the program merges what the model says is one behaviour, and loses nothing."""
 import re
 
-from reqx.host.adapters.fake import FakeLLM
-from reqx.modules.capabilities.facade import Capability
-from reqx.modules.evidence.facade import Observation
-from reqx.modules.requirements import use_cases
-from reqx.modules.requirements.facade import RequirementsFacade
+from backspec.host.adapters.fake import FakeLLM
+from backspec.modules.capabilities.facade import Capability
+from backspec.modules.evidence.facade import Observation
+from backspec.modules.requirements import use_cases
+from backspec.modules.requirements.facade import RequirementsFacade
 
 CAP = Capability(id="stock", name="Stock", summary="Stock rules.")
 
@@ -57,7 +57,7 @@ def test_merged_evidence_is_the_union_copied_from_the_observations():
         assert (e.path, e.lines, e.quote) == (known[e.observation].path, known[e.observation].lines, known[e.observation].quote)
     assert merged.scope == "cross_file" and merged.level == "system" and merged.conditions == ["stock is low"]
     assert merged.merged_from == ["Requirement OBS-000.", "Requirement OBS-001.", "Requirement OBS-012."]
-    from reqx.kernel.text import short_hash
+    from backspec.kernel.text import short_hash
     assert merged.id == "REQ-" + short_hash("stock", merged.statement)
     assert len(result.requirements) == 13 - 2 and result.unconsolidated == {}
     assert [r.stage for r in llm.requests].count("consolidate") == 1

@@ -5,13 +5,13 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from reqx import Config, extract, orient
-from reqx.host.adapters.fake import FakeLLM
-from reqx.host.cli import app
-from reqx.modules.capabilities.facade import CapabilitiesFileError
+from backspec import Config, extract, orient
+from backspec.host.adapters.fake import FakeLLM
+from backspec.host.cli import app
+from backspec.modules.capabilities.facade import CapabilitiesFileError
 from test_pipeline import assess, assign, observe, orient as orient_answer, repo, synthesise
 
-FILE = "reqx.capabilities.yaml"
+FILE = "backspec.capabilities.yaml"
 
 
 def fake(**override):
@@ -84,7 +84,7 @@ def test_an_invalid_file_is_refused_naming_the_file_and_every_problem(tmp_path):
 
 def test_a_file_that_is_not_yaml_is_refused_naming_the_file(tmp_path):
     write(tmp_path, "- id: [unclosed\n")
-    with pytest.raises(CapabilitiesFileError, match="reqx.capabilities.yaml is not valid YAML"):
+    with pytest.raises(CapabilitiesFileError, match="backspec.capabilities.yaml is not valid YAML"):
         go(tmp_path, fake())
 
 
@@ -97,7 +97,7 @@ def test_plumbing_is_added_when_the_file_lacks_it(tmp_path):
 def test_the_written_file_loads_back_to_the_same_capabilities(tmp_path):
     result = go(tmp_path, fake(), gate=True)
     text = (tmp_path / FILE).read_text()
-    assert text.startswith("#") and "reqx extract" in text
+    assert text.startswith("#") and "backspec extract" in text
     again = go(tmp_path, fake(), gate=True)
     assert again.capabilities == result.capabilities and again.run.capabilities_source == "file"
     assert [c["id"] for c in yaml.safe_load(text)] == ["stock", "plumbing"]
@@ -118,7 +118,7 @@ def test_library_orient_writes_the_file_and_refuses_to_overwrite_without_force(t
 def cli(monkeypatch):
     """The command line, with the model backend replaced by the fake."""
     llm = fake()
-    monkeypatch.setattr("reqx.host.composition._provider", lambda config: (llm, "fake"))
+    monkeypatch.setattr("backspec.host.composition._provider", lambda config: (llm, "fake"))
     return lambda *args: CliRunner().invoke(app, [*args, "--no-cache"]), llm
 
 
@@ -148,7 +148,7 @@ def test_extract_reports_an_invalid_file_on_the_command_line(tmp_path, cli):
     root = repo(tmp_path)
     write(root, "- id: BAD\n  name: x\n")
     done = invoke("extract", str(root))
-    assert done.exit_code == 2 and "reqx.capabilities.yaml is not usable" in done.output and "'BAD'" in done.output
+    assert done.exit_code == 2 and "backspec.capabilities.yaml is not usable" in done.output and "'BAD'" in done.output
 
 
 def test_extract_with_gate_on_the_command_line_stops_cleanly(tmp_path, cli):

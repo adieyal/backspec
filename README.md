@@ -1,10 +1,10 @@
-# reqx
+# backspec
 
 Reads a codebase and writes down the user requirements it implements, as structured JSON.
 Every requirement cites the lines it rests on. Every citation is checked in code. Every file
 is accounted for.
 
-reqx proposes candidate requirements. It is not a system of record, and a requirement it writes
+backspec proposes candidate requirements. It is not a system of record, and a requirement it writes
 is a reading of the code, not proof that the product behaves that way.
 
 ## Use
@@ -14,21 +14,21 @@ pip install -e .
 ```
 
 ```bash
-reqx extract ./repo --dry-run
+backspec extract ./repo --dry-run
 ```
 
 ```bash
-reqx extract ./repo --include "src/**" --exclude "**/migrations/**" -o reqs.json
+backspec extract ./repo --include "src/**" --exclude "**/migrations/**" -o reqs.json
 ```
 
 To check the grouping before the expensive stages run, propose the capabilities first. This
-writes `reqx.capabilities.yaml` at the root of the repository, which you can edit.
-`reqx extract` then uses the file and skips the orient call, on this and every later run.
+writes `backspec.capabilities.yaml` at the root of the repository, which you can edit.
+`backspec extract` then uses the file and skips the orient call, on this and every later run.
 
 ```bash
-reqx orient ./repo          # writes ./repo/reqx.capabilities.yaml; --force replaces it
-reqx extract ./repo         # uses the file; --capabilities PATH picks another
-reqx extract ./repo --gate  # orient if there is no file, write it, and stop
+backspec orient ./repo          # writes ./repo/backspec.capabilities.yaml; --force replaces it
+backspec extract ./repo         # uses the file; --capabilities PATH picks another
+backspec extract ./repo --gate  # orient if there is no file, write it, and stop
 ```
 
 A file that breaks the rules (unique ids of lowercase letters, digits and underscores; a name
@@ -45,66 +45,66 @@ estimated cost would pass N. The run is then `partial` with `run.budget_reached`
 A run can overshoot N by the amount the calls in flight turned out dearer than estimated.
 
 ```bash
-reqx extract ./repo --max-tokens 400000
+backspec extract ./repo --max-tokens 400000
 ```
 
 ```bash
-reqx render reqs.json -o REQUIREMENTS.md
-reqx render reqs.json --format csv -o reqs.csv            # one row per requirement and evidence pair
-reqx render reqs.json --format openspec -o spec/          # a directory; -o is required
-reqx render reqs.json --format html -o reqs.html --title "My shop"   # one page, opens offline
-reqx extract ./repo --format csv -o reqs.csv
+backspec render reqs.json -o REQUIREMENTS.md
+backspec render reqs.json --format csv -o reqs.csv            # one row per requirement and evidence pair
+backspec render reqs.json --format openspec -o spec/          # a directory; -o is required
+backspec render reqs.json --format html -o reqs.html --title "My shop"   # one page, opens offline
+backspec extract ./repo --format csv -o reqs.csv
 ```
 
 Formats: `json`, `md` (default for `render`), `csv`, `html` and `openspec`; an unknown name is refused with
 the list. `csv` adds `--include-hidden` (a `hidden` column). `openspec` writes
 `specs/<capability>/spec.md`, `NOT_EXPORTED.md` and `README.md`. Only requirements with support
 `direct` or `partial` are exported, and, with `--strict` (the default), only those with a scenario.
-A scenario comes only from a test or example in the code and cites it; reqx never writes one to fill
+A scenario comes only from a test or example in the code and cites it; backspec never writes one to fill
 a gap. `--no-strict` keeps a requirement with no scenario and marks it as having none. A format is
 a function in `modules/report/renderers.py`, added to `RENDERERS`.
 
 ```bash
-reqx status reqs.json --root ./repo
+backspec status reqs.json --root ./repo
 ```
 
 `status` compares a saved result with the files on disk and lists the requirements whose cited
 files have changed (`stale`) or gone (`source_missing`). It calls no model. Exit code 0 when
 everything is current, 1 otherwise, 2 for a file that is not a result. `--json` prints the
-report as JSON; in Python, `reqx.status(result_or_path, root)` returns it.
+report as JSON; in Python, `backspec.status(result_or_path, root)` returns it.
 
 ```bash
-reqx validate reqs.json            # lint: exit 0 clean (warnings allowed), 1 errors, 2 not a result
-reqx validate reqs.json --strict   # warnings count as errors; --json prints the findings
-reqx coverage reqs.json            # files per state, unused observations, files worth a look; --all, --json
-reqx cache info ./repo             # the cache folder, replies per stage, size; --cache-dir PATH
-reqx cache clear ./repo --yes      # without --yes, only reports what it would delete
+backspec validate reqs.json            # lint: exit 0 clean (warnings allowed), 1 errors, 2 not a result
+backspec validate reqs.json --strict   # warnings count as errors; --json prints the findings
+backspec coverage reqs.json            # files per state, unused observations, files worth a look; --all, --json
+backspec cache info ./repo             # the cache folder, replies per stage, size; --cache-dir PATH
+backspec cache clear ./repo --yes      # without --yes, only reports what it would delete
 ```
 
 `validate` checks a saved result against the schema, then runs deterministic checks: errors for
 a citation that points at nothing, an unknown capability or a duplicate id, warnings for vague,
 compound or weakly supported requirements. Every extraction runs the same checks and stores the
-findings in `diagnostics.lint`. In Python, `reqx.validate(result_or_path)` returns the report.
+findings in `diagnostics.lint`. In Python, `backspec.validate(result_or_path)` returns the report.
 `coverage` reads only the saved result. `cache clear` deletes only files named
 `<stage>-<hex>.json` and refuses a folder that holds anything else.
 
 Requirement ids last between runs: a run carries them forward from the previous result by how
 much the cited code overlaps, so rewording a statement keeps its id. `-o` names the previous
 result when that file already exists, or give `--previous FILE`. Record a decision, and the next
-run applies it. The entry goes in `reqx.review.yaml` (or `--review PATH`).
+run applies it. The entry goes in `backspec.review.yaml` (or `--review PATH`).
 
 ```bash
-reqx review reqs.json REQ-1a2b3c4d --confirm --reviewer ana
-reqx review reqs.json REQ-1a2b3c4d --statement "Managers may adjust stock." --condition "Never below zero."
-reqx review reqs.json REQ-1a2b3c4d --reject --note "Not a requirement"
-reqx extract ./repo -o reqs.json
+backspec review reqs.json REQ-1a2b3c4d --confirm --reviewer ana
+backspec review reqs.json REQ-1a2b3c4d --statement "Managers may adjust stock." --condition "Never below zero."
+backspec review reqs.json REQ-1a2b3c4d --reject --note "Not a requirement"
+backspec extract ./repo -o reqs.json
 ```
 
 A rejected requirement is hidden and counted in `diagnostics.review`. If the cited code changed
 since the decision, it comes back as `needs_review`. Entries that match nothing are listed as stale.
 
 ```python
-from reqx import Config, extract
+from backspec import Config, extract
 
 result = extract("./repo", Config(include=["src/**"]))
 for requirement in result.requirements:
@@ -112,7 +112,7 @@ for requirement in result.requirements:
 ```
 
 ```python
-from reqx import orient
+from backspec import orient
 
 for capability in orient("./repo"):   # writes the capabilities file
     print(capability.id, capability.name)
@@ -122,10 +122,10 @@ The default model backend is the Claude Code CLI, using the login you already ha
 installed. `--provider codex` uses the Codex CLI instead (`codex exec`, read-only sandbox, prompt on
 stdin). **That adapter has not been run against the real Codex CLI**: it was written from the
 documented interface and tested only against a fake `codex` script; its flags are listed in
-`src/reqx/host/adapters/codex.py` and should be checked first. To use anything else, pass an object with a `complete(request) -> str` method as
+`src/backspec/host/adapters/codex.py` and should be checked first. To use anything else, pass an object with a `complete(request) -> str` method as
 `Config(provider=...)`.
 
-A model does not describe the same file the same way twice, so reqx asks it only about what
+A model does not describe the same file the same way twice, so backspec asks it only about what
 is new. When a previous result is available (`--previous FILE`, or the `-o` file if it already
 exists):
 
@@ -185,11 +185,11 @@ Not guaranteed:
 
 - That a requirement is true. The support verdict is a model's judgement.
 - That all requirements were found. File coverage is not completeness.
-- That cited code is reachable. reqx reads code and does not run it.
+- That cited code is reachable. backspec reads code and does not run it.
 
 ## Optional syntax support
 
-reqx needs no parser. If `tree-sitter-language-pack` is installed (`pip install "reqx[treesitter]"`),
+backspec needs no parser. If `tree-sitter-language-pack` is installed (`pip install "backspec[treesitter]"`),
 files in Python, JavaScript, TypeScript, TSX, Go, Java, Ruby, Rust, C# and PHP are analysed with it:
 
 - a large file is cut between top-level functions and classes, not inside one;
@@ -200,14 +200,14 @@ files in Python, JavaScript, TypeScript, TSX, Go, Java, Ruby, Rust, C# and PHP a
   `run.text_files` count them.
 
 Without the package, for another language, or when parsing fails, a file is read as text, as
-before. `reqx extract --text-only` (`Config(syntax=False)`) does that even when it is installed.
+before. `backspec extract --text-only` (`Config(syntax=False)`) does that even when it is installed.
 Observations made one way are not reused by a run made the other way.
 
 ## Layout
 
-One module per capability under `src/reqx/modules/`, each with a `domain.py`, `use_cases.py`
+One module per capability under `src/backspec/modules/`, each with a `domain.py`, `use_cases.py`
 and a small `facade.py`, plus `ports.py` where it needs the outside world. Adapters and wiring
-live in `src/reqx/host/`. The import rules are enforced by `tests/test_architecture.py`.
+live in `src/backspec/host/`. The import rules are enforced by `tests/test_architecture.py`.
 
 ```bash
 python3 -m pytest -q
@@ -221,7 +221,7 @@ requirements as single sentences; a requirement opens to its conditions, scenari
 "To review" holds the requirements below direct support and, folded away, open questions, lint
 findings and failures. "Coverage" lists the files by state, folded, with the run's details.
 
-The template is `src/reqx/templates/report.html`. Its look follows `DESIGN.md` at the root of this
+The template is `src/backspec/templates/report.html`. Its look follows `DESIGN.md` at the root of this
 repository (the ThoughtStream design system from designmd.ai); the heading font, Libre Baskerville
 (OFL), is embedded in the page.
 
@@ -233,4 +233,4 @@ been checked by a person. See the spec.
 ## Licence
 
 MIT; see `LICENSE`. The HTML report embeds the Libre Baskerville font, which is under the SIL Open
-Font Licence (`src/reqx/templates/libre-baskerville-OFL.txt`).
+Font Licence (`src/backspec/templates/libre-baskerville-OFL.txt`).

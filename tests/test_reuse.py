@@ -1,8 +1,8 @@
 """An unchanged file keeps the observations an earlier run made of it."""
 from test_pipeline import SERVICE, assess, assign, fake, observe, orient, repo, synthesise
 
-from reqx import Config, extract
-from reqx.host.adapters.fake import FakeLLM
+from backspec import Config, extract
+from backspec.host.adapters.fake import FakeLLM
 
 
 def saved(tmp_path, result):
@@ -58,7 +58,7 @@ def test_only_a_changed_file_is_read_again(tmp_path):
 def test_observations_made_another_way_are_not_reused(tmp_path, monkeypatch):
     root = repo(tmp_path)
     first = extract(root, Config(provider=fake(), use_cache=False))
-    from reqx.kernel import prompts
+    from backspec.kernel import prompts
     real = prompts.load
     monkeypatch.setattr(prompts, "load", lambda name: real(name) + ("\nLook harder." if name == "observe" else ""))
     llm = fake()
@@ -148,7 +148,7 @@ def test_code_that_moved_keeps_its_observations_and_citations_follow_it(tmp_path
     cited = next(e for e in second.requirements[0].evidence if e.path == "src/service.py")
     assert cited.lines == now.lines   # the kept requirement points at where the code is now
     assert second.requirements[0].id == first.requirements[0].id and second.run.reused_capabilities == ["stock"]
-    from reqx import status
+    from backspec import status
     assert status(second, root).all_current
 
 
@@ -181,7 +181,7 @@ def test_a_changed_file_is_read_whole_when_the_previous_result_kept_no_line_dige
 def test_requirements_written_another_way_are_not_reused(tmp_path, monkeypatch):
     root = repo(tmp_path)
     first = extract(root, Config(provider=fake(), use_cache=False))
-    from reqx.kernel import prompts
+    from backspec.kernel import prompts
     real = prompts.load
     monkeypatch.setattr(prompts, "load", lambda name: real(name) + ("\nBe brief." if name == "synthesise" else ""))
     llm = rewording_llm()
@@ -190,7 +190,7 @@ def test_requirements_written_another_way_are_not_reused(tmp_path, monkeypatch):
 
 
 def test_a_rejected_requirement_is_kept_aside_and_stays_hidden_on_the_next_run(tmp_path):
-    from reqx.host.composition import review_requirement
+    from backspec.host.composition import review_requirement
     root = repo(tmp_path)
     first = extract(root, Config(provider=fake(), use_cache=False))
     before = saved(tmp_path, first)

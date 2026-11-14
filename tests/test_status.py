@@ -3,9 +3,9 @@ import json
 
 from typer.testing import CliRunner
 
-from reqx import status
-from reqx.host.adapters.filesystem import DiskRepo
-from reqx.host.cli import app
+from backspec import status
+from backspec.host.adapters.filesystem import DiskRepo
+from backspec.host.cli import app
 from test_pipeline import fake, repo
 
 
@@ -23,7 +23,7 @@ def repo_in(tmp_path):
 
 
 def run_at(root):
-    from reqx import Config, extract
+    from backspec import Config, extract
     return extract(root, Config(provider=fake(), use_cache=False))
 
 

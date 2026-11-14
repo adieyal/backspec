@@ -1,4 +1,4 @@
-from reqx.modules.evidence.domain import (Chunk, Observation, RawObservation, Rejected, pack, render,
+from backspec.modules.evidence.domain import (Chunk, Observation, RawObservation, Rejected, pack, render,
                                           split_file, verify)
 
 LINES = ["def pay(order):", "    if order.total > LIMIT:", "        raise OverLimit()", "    charge(order)", ""]
@@ -59,7 +59,7 @@ def test_batches_never_exceed_the_limit_unless_one_chunk_does():
 
 
 def test_a_change_is_found_line_by_line():
-    from reqx.modules.evidence.domain import compare, line_digest, windows
+    from backspec.modules.evidence.domain import compare, line_digest, windows
     old = ["a = 1", "b = 2", "c = 3", "d = 4", "e = 5"]
     new = ["# header", "a = 1", "b = 2", "c = 30", "d = 4", "e = 5", "f = 6"]
     change = compare(line_digest(old), new)
@@ -73,7 +73,7 @@ def test_a_change_is_found_line_by_line():
 
 
 def test_an_observation_id_follows_the_cited_text_not_its_position():
-    from reqx.modules.evidence.domain import observation_id
+    from backspec.modules.evidence.domain import observation_id
     assert observation_id("a.py", ["  x = 1", "y = 2"], "S.") == observation_id("a.py", ["x = 1", "  y = 2"], " S. ")
     assert observation_id("a.py", ["x = 1"], "S.") != observation_id("a.py", ["x = 2"], "S.")
     assert observation_id("a.py", ["x = 1"], "S.") != observation_id("b.py", ["x = 1"], "S.")

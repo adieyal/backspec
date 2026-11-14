@@ -1,11 +1,11 @@
-"""`reqx coverage`: what happened to each file of a saved result, with no model call."""
+"""`backspec coverage`: what happened to each file of a saved result, with no model call."""
 import json
 
 from typer.testing import CliRunner
 
-from reqx import Config, extract
-from reqx.host.cli import app
-from reqx.modules.report.facade import FileCoverage, coverage_report
+from backspec import Config, extract
+from backspec.host.cli import app
+from backspec.modules.report.facade import FileCoverage, coverage_report
 from test_pipeline import fake, repo
 
 

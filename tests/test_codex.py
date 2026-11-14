@@ -5,10 +5,10 @@ import stat
 
 import pytest
 
-from reqx import Config, extract
-from reqx.host.adapters.codex import CODEX_FLAGS, Codex
-from reqx.host.composition import _provider
-from reqx.kernel.llm import LLMError, LLMRequest
+from backspec import Config, extract
+from backspec.host.adapters.codex import CODEX_FLAGS, Codex
+from backspec.host.composition import _provider
+from backspec.kernel.llm import LLMError, LLMRequest
 from test_pipeline import repo
 
 SCRIPT = """#!/bin/sh

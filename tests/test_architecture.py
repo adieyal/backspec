@@ -2,7 +2,7 @@
 import ast
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parent.parent / "src" / "reqx"
+SRC = Path(__file__).resolve().parent.parent / "src" / "backspec"
 PURE_LIBRARIES = {"pydantic", "pathspec"}
 
 
@@ -16,8 +16,8 @@ def imports(path: Path) -> set[str]:
     return found
 
 
-def reqx_imports(path: Path) -> set[str]:
-    return {name for name in imports(path) if name == "reqx" or name.startswith("reqx.")}
+def backspec_imports(path: Path) -> set[str]:
+    return {name for name in imports(path) if name == "backspec" or name.startswith("backspec.")}
 
 
 def module_files():
@@ -32,29 +32,29 @@ def test_a_domain_imports_only_the_kernel_and_itself():
     for module, path in module_files():
         if path.name != "domain.py":
             continue
-        for name in reqx_imports(path):
-            assert name.startswith("reqx.kernel") or name == f"reqx.modules.{module}.domain", f"{path}: {name}"
+        for name in backspec_imports(path):
+            assert name.startswith("backspec.kernel") or name == f"backspec.modules.{module}.domain", f"{path}: {name}"
 
 
 def test_a_module_reaches_another_only_through_its_facade():
     """Rule 2: use cases, ports and facades may use another capability's facade, never its insides."""
     for module, path in module_files():
-        for name in reqx_imports(path):
-            if name.startswith("reqx.modules.") and not name.startswith(f"reqx.modules.{module}."):
+        for name in backspec_imports(path):
+            if name.startswith("backspec.modules.") and not name.startswith(f"backspec.modules.{module}."):
                 assert name.endswith(".facade"), f"{path}: {name}"
 
 
 def test_no_module_and_no_kernel_file_imports_an_adapter():
     """Rule 3: the dependency points inward. Only the host knows the adapters."""
     for path in list((SRC / "modules").rglob("*.py")) + list((SRC / "kernel").rglob("*.py")):
-        for name in reqx_imports(path):
-            assert not name.startswith("reqx.host"), f"{path}: {name}"
+        for name in backspec_imports(path):
+            assert not name.startswith("backspec.host"), f"{path}: {name}"
 
 
 def test_the_kernel_imports_no_module():
     for path in (SRC / "kernel").rglob("*.py"):
-        for name in reqx_imports(path):
-            assert name.startswith("reqx.kernel"), f"{path}: {name}"
+        for name in backspec_imports(path):
+            assert name.startswith("backspec.kernel"), f"{path}: {name}"
 
 
 def test_every_module_has_a_domain_use_cases_and_a_facade():

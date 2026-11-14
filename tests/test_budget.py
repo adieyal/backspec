@@ -7,11 +7,11 @@ from dataclasses import replace
 import pytest
 from typer.testing import CliRunner
 
-from reqx import Config, LLMError, LLMRequest, extract
-from reqx.host import cli
-from reqx.host.adapters.cache import CachedLLM
-from reqx.host.adapters.fake import FakeLLM
-from reqx.kernel.usage import Usage, reservation
+from backspec import Config, LLMError, LLMRequest, extract
+from backspec.host import cli
+from backspec.host.adapters.cache import CachedLLM
+from backspec.host.adapters.fake import FakeLLM
+from backspec.kernel.usage import Usage, reservation
 from test_pipeline import assess, assign, fake, observe, orient, repo, synthesise
 
 STAGES = {"observe", "orient", "assign", "synthesise", "assess"}
@@ -53,7 +53,7 @@ def test_totals_add_up_across_stages_and_cached_replies_count_zero(tmp_path):
     assert (second.run.input_tokens, second.run.output_tokens) == (0, 0)
     assert all(u.calls == 0 and u.cached == 1 and u.input_tokens == 0 for u in second.run.usage_by_stage.values())
     # a mix: only the synthesise prompt changed, so four stages are cached and one is paid for
-    from reqx.kernel import prompts
+    from backspec.kernel import prompts
     real = prompts.load
     prompts.load = lambda name: real(name) + ("\nBe brief." if name == "synthesise" else "")
     try:
@@ -217,7 +217,7 @@ def test_the_dry_run_estimates_the_tokens_of_the_files_to_read(tmp_path):
 
 
 def test_the_claude_code_envelope_is_read_as_input_including_cache_fields():
-    from reqx.host.adapters.claude_code import _usage
+    from backspec.host.adapters.claude_code import _usage
     envelope = {"total_cost_usd": 0.00026, "usage": {"input_tokens": 2, "cache_creation_input_tokens": 1311,
                                                     "cache_read_input_tokens": 5, "output_tokens": 9}}
     assert _usage(envelope) == Usage(1318, 9, False, 0.00026)

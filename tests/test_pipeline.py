@@ -1,12 +1,12 @@
-"""The whole pipeline against a fake model: what reqx guarantees whatever the model says."""
+"""The whole pipeline against a fake model: what backspec guarantees whatever the model says."""
 import json
 import re
 
 from typer.testing import CliRunner
 
-from reqx import Config, ExtractionResult, extract, to_markdown
-from reqx.host.adapters.fake import FakeLLM
-from reqx.host.cli import app
+from backspec import Config, ExtractionResult, extract, to_markdown
+from backspec.host.adapters.fake import FakeLLM
+from backspec.host.cli import app
 
 POLICY = "def can_adjust(user):\n    return user.role == 'manager'\n"
 SERVICE = "def adjust(item, delta):\n    if item.quantity + delta < 0:\n        raise NegativeStock()\n    item.quantity += delta\n"
@@ -166,7 +166,7 @@ def test_changing_one_stages_prompt_leaves_the_other_stages_cached(tmp_path, mon
     (tmp_path / "repo").mkdir()
     root, cache = repo(tmp_path / "repo"), tmp_path / "cache"
     extract(root, Config(provider=fake(), cache_dir=cache))
-    from reqx.kernel import prompts
+    from backspec.kernel import prompts
     real = prompts.load
     monkeypatch.setattr(prompts, "load", lambda name: real(name) + ("\nBe brief." if name == "synthesise" else ""))
     second = extract(root, Config(provider=fake(), cache_dir=cache))

@@ -1,5 +1,5 @@
 <!-- Source: https://designmd.ai/chef/thoughtstream (downloaded 2026-11-13). The HTML report in
-     src/reqx/templates/report.html follows this file. The report adds a dark palette, which this file does not define. -->
+     src/backspec/templates/report.html follows this file. The report adds a dark palette, which this file does not define. -->
 
 # ThoughtStream
 

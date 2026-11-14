@@ -1,0 +1,26 @@
+"""Requirements, as the rest of backspec sees it."""
+from __future__ import annotations
+
+from backspec.kernel.llm import LLMPort
+from backspec.modules.capabilities.facade import Capability
+from backspec.modules.evidence.facade import Observation
+from backspec.modules.requirements.domain import Evidence, Requirement, Scenario
+from backspec.modules.requirements.use_cases import Synthesis, assess, fingerprint, synthesise
+
+__all__ = ["Evidence", "Requirement", "RequirementsFacade", "Scenario", "Synthesis"]
+
+
+class RequirementsFacade:
+    def __init__(self, llm: LLMPort, workers: int = 4):
+        self._llm = llm
+        self._workers = workers
+
+    def synthesise(self, capabilities: list[Capability], by_capability: dict[str, list[Observation]]) -> Synthesis:
+        return synthesise(capabilities, by_capability, self._llm, self._workers)
+
+    def fingerprint(self) -> str:
+        """Identifies the way requirements are written and judged; those made another way are not reused."""
+        return fingerprint()
+
+    def assess(self, requirements: list[Requirement], file_lines: dict[str, list[str]]) -> list[Requirement]:
+        return assess(requirements, file_lines, self._llm, self._workers)

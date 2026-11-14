@@ -1,4 +1,4 @@
-"""Output formats and scenarios: what reqx writes for spreadsheets and spec tools."""
+"""Output formats and scenarios: what backspec writes for spreadsheets and spec tools."""
 import csv
 import io
 import re
@@ -6,12 +6,12 @@ import re
 import pytest
 from typer.testing import CliRunner
 
-from reqx import Config, ExtractionResult, extract, to_markdown
-from reqx.host.adapters.fake import FakeLLM
-from reqx.host.cli import app
-from reqx.modules.report.domain import requirement_title, with_shall
-from reqx.modules.report.facade import UnknownFormat, formats, render
-from reqx.modules.requirements.domain import (MergeGroup, RawScenario, CitedObservation, Requirement, Scenario,
+from backspec import Config, ExtractionResult, extract, to_markdown
+from backspec.host.adapters.fake import FakeLLM
+from backspec.host.cli import app
+from backspec.modules.report.domain import requirement_title, with_shall
+from backspec.modules.report.facade import UnknownFormat, formats, render
+from backspec.modules.requirements.domain import (MergeGroup, RawScenario, CitedObservation, Requirement, Scenario,
                                               Evidence, build_scenarios, merge_requirements)
 from tests.test_pipeline import assign, observe, orient, repo
 
@@ -149,7 +149,7 @@ def test_openspec_writes_requirement_blocks_with_evidence_and_scenarios(result):
 def test_openspec_non_strict_includes_it_with_the_marker_and_no_made_up_scenario(result):
     spec = tree(result, strict=False)["specs/stock/spec.md"]
     block = next(b for b in spec.split("### Requirement: ") if b.startswith("Stock must never go negative"))
-    assert "> No scenario: reqx found no test or example that shows this case." in block
+    assert "> No scenario: backspec found no test or example that shows this case." in block
     assert "GIVEN" not in block and "Scenario:" not in block
 
 
@@ -228,7 +228,7 @@ def test_markdown_shows_scenarios_under_their_requirement(result):
 
 
 def test_a_reused_requirement_has_its_scenario_evidence_refreshed():
-    from reqx.modules.extraction.use_cases import _refreshed
+    from backspec.modules.extraction.use_cases import _refreshed
 
     class Now:
         path, lines, quote = "src/new.py", (7, 8), "moved"

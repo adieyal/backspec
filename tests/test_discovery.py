@@ -1,5 +1,5 @@
-from reqx.modules.discovery.domain import excluded_by_pattern, read_or_skip, Left, SourceFile
-from reqx.modules.discovery.facade import DiscoveryFacade
+from backspec.modules.discovery.domain import excluded_by_pattern, read_or_skip, Left, SourceFile
+from backspec.modules.discovery.facade import DiscoveryFacade
 
 
 class Repo:
@@ -40,7 +40,7 @@ def test_every_listed_file_ends_in_exactly_one_place():
     assert len(read) + len(left) == 4
 
 
-def test_reqx_does_not_read_its_own_files_as_source():
-    assert excluded_by_pattern("reqx.capabilities.yaml", [], []) == "default_exclude"
-    assert excluded_by_pattern("reqx.review.yaml", [], []) == "default_exclude"
-    assert excluded_by_pattern("config/reqx.review.yaml", [], []) is None
+def test_backspec_does_not_read_its_own_files_as_source():
+    assert excluded_by_pattern("backspec.capabilities.yaml", [], []) == "default_exclude"
+    assert excluded_by_pattern("backspec.review.yaml", [], []) == "default_exclude"
+    assert excluded_by_pattern("config/backspec.review.yaml", [], []) is None

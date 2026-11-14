@@ -4,10 +4,10 @@ import re
 import pytest
 from typer.testing import CliRunner
 
-from reqx import Config, extract
-from reqx.host import cli
-from reqx.host.adapters.fake import FakeLLM
-from reqx.modules.triage.domain import (AUDIT_MAX, AUDIT_MIN, BATCH_FILES, PREVIEW_LINES, audit_sample, audit_size,
+from backspec import Config, extract
+from backspec.host import cli
+from backspec.host.adapters.fake import FakeLLM
+from backspec.modules.triage.domain import (AUDIT_MAX, AUDIT_MIN, BATCH_FILES, PREVIEW_LINES, audit_sample, audit_size,
                                         clopper_pearson, is_skipped, pack, preview)
 from test_pipeline import assess, assign, observe, orient, synthesise
 
@@ -252,7 +252,7 @@ def test_a_changed_file_is_triaged_again_and_the_unchanged_ones_are_not(tmp_path
 def test_verdicts_made_with_another_prompt_are_not_reused(tmp_path, monkeypatch):
     root, triage = audited_repo(tmp_path)
     first = run(root, fake(triage))
-    from reqx.kernel import prompts
+    from backspec.kernel import prompts
     real = prompts.load
     monkeypatch.setattr(prompts, "load", lambda name: real(name) + ("\nLook harder." if name == "triage" else ""))
     llm = fake(triage)

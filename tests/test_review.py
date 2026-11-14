@@ -4,10 +4,10 @@ import re
 import yaml
 from typer.testing import CliRunner
 
-from reqx import Config, extract
-from reqx.host.adapters.fake import FakeLLM
-from reqx.host.cli import app
-from reqx.modules.review.domain import Known, ReviewEntry, anchors_of, carry_ids
+from backspec import Config, extract
+from backspec.host.adapters.fake import FakeLLM
+from backspec.host.cli import app
+from backspec.modules.review.domain import Known, ReviewEntry, anchors_of, carry_ids
 
 POLICY = "def can_adjust(user):\n    return user.role == 'manager'\n"
 SERVICE = "def adjust(item, delta):\n    if item.quantity + delta < 0:\n        raise NegativeStock()\n    item.quantity += delta\n"
@@ -58,7 +58,7 @@ def _mk(path):
 
 
 def write_entries(root, entries):
-    (root / "reqx.review.yaml").write_text(yaml.safe_dump({"entries": entries}))
+    (root / "backspec.review.yaml").write_text(yaml.safe_dump({"entries": entries}))
 
 
 def entry(requirement, decision, **fields):
@@ -185,7 +185,7 @@ def test_an_entry_for_an_unknown_requirement_is_reported_stale_and_kept(tmp_path
                           "anchors": [["gone.py", "nothing"]]}])
     result = run(root, previous=saved)
     assert result.diagnostics.review.stale_entries == ["REQ-gone"]
-    assert "REQ-gone" in (root / "reqx.review.yaml").read_text()
+    assert "REQ-gone" in (root / "backspec.review.yaml").read_text()
 
 
 def test_the_review_command_writes_an_entry_that_the_next_run_applies(tmp_path):
@@ -223,7 +223,7 @@ def test_the_default_review_file_under_the_root_is_used_when_it_exists(tmp_path)
 
 
 def test_an_existing_json_output_file_is_the_previous_result_unless_one_is_named(tmp_path):
-    from reqx.host.composition import default_previous
+    from backspec.host.composition import default_previous
     out = tmp_path / "reqs.json"
     assert default_previous(None, out) is None
     out.write_text("{}")

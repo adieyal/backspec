@@ -3,24 +3,28 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "reqx"
+name = "backspec"
 version = "0.0.1"
 description = "Extract user requirements from a codebase, with verified citations and a per-file account of what was read."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-license-files = ["LICENSE", "src/reqx/templates/libre-baskerville-OFL.txt"]
+license-files = ["LICENSE", "src/backspec/templates/libre-baskerville-OFL.txt"]
+authors = [{ name = "Adi Eyal" }]
 dependencies = ["pydantic>=2.6", "typer>=0.12", "pathspec>=0.12", "pyyaml>=6"]
+
+[project.urls]
+Repository = "https://github.com/adieyal/reqx"
 
 [project.optional-dependencies]
 treesitter = ["tree-sitter-language-pack>=1.0"]
 dev = ["pytest>=8"]
 
 [project.scripts]
-reqx = "reqx.host.cli:app"
+backspec = "backspec.host.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/reqx"]
+packages = ["src/backspec"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
