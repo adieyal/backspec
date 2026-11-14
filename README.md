@@ -1,236 +1,410 @@
 # backspec
 
-Reads a codebase and writes down the user requirements it implements, as structured JSON.
-Every requirement cites the lines it rests on. Every citation is checked in code. Every file
-is accounted for.
+Turn an unfamiliar codebase into a first draft of its requirements, with links to the code
+behind every statement.
 
-backspec proposes candidate requirements. It is not a system of record, and a requirement it writes
-is a reading of the code, not proof that the product behaves that way.
-
-## Use
-
-```bash
-pip install -e .
-```
+backspec reads source code, describes the behaviour it finds, and groups related requirements
+into a report you can browse and review. Use it to understand a project you inherited, recover
+missing documentation, or check which requirements need another look after the code changes.
+Every citation is checked against the source, and the report records which files were read,
+skipped or failed.
 
 ```bash
-backspec extract ./repo --dry-run
+backspec extract ./my-service -o reqs.json
+backspec render reqs.json --format html -o reqs.html
 ```
+
+Open `reqs.html` in your browser to explore the report. It works offline.
+
+backspec proposes requirements for you to review. It checks that the cited code exists, but
+does not run that code or prove that a requirement is true.
+
+## What you get
+
+Each requirement describes a behaviour, the conditions under which it applies, and the code
+that supports it. Related requirements are grouped into **capabilities**, such as stock
+management or access control.
+
+This example comes from a real run on [Grounded](https://github.com/adieyal/grounded-m1),
+a tool that tracks requirements and their evidence. The wording is edited for readability:
+
+> **If any of a rule's tests fails or errors, mark the rule as broken, regardless of other
+> evidence. Explain why by naming each affected test and its outcome.**
+>
+> `REQ-a4ae6fab` · Support: `direct`
+>
+> Condition: At least one test has failed or errored.
+>
+> Evidence:
+>
+> - `grounded/modules/evidence/domain/status.py:39-42` (`rule_status`)
+> - `grounded/modules/evidence/domain/status.py:42-42` (`rule_status`)
+> - `tests/test_evidence_status.py:21-25` (`test_a_failed_or_errored_test_makes_the_rule_broken_whatever_else_holds`)
+>
+> Scenario: A rule has a failed test and an errored test. When its status is determined,
+> it is marked as broken, with a reason naming each test and its outcome.
+
+The `direct` label means the model judged that the cited code supports the statement.
+The other assessed labels are `partial`, `insufficient` and `conflicting`. These are model
+judgements to help you decide what to review, not proof of correctness.
+
+That run produced 22 requirements in 5 capabilities. The report accounted for 16 files:
+12 were read, and each of the other 4 had a reason recorded. It made 10 model calls and
+cost $0.39. This is one run's result, not a cost estimate for other projects.
+
+<details>
+<summary>See the JSON behind this requirement</summary>
+
+The saved result includes a quoted line of source code for each citation. This excerpt is
+shortened, and uses the same edited wording as the example above:
+
+```json
+{
+  "id": "REQ-a4ae6fab",
+  "capability": "rule_status",
+  "statement": "If any of a rule's tests fails or errors, mark the rule as broken, regardless of other evidence. Explain why by naming each affected test and its outcome.",
+  "support": "direct",
+  "support_note": "Lines 40-42 return broken with one 'name: outcome.' reason per failing/error test ...",
+  "evidence": [
+    {
+      "path": "grounded/modules/evidence/domain/status.py",
+      "lines": [39, 42],
+      "quote": "return Verdict('broken', tuple(f'{test.name}: {test.outcome}.' for test in failing))",
+      "symbol": "rule_status"
+    }
+  ]
+}
+```
+
+</details>
+
+## Quick start
+
+You need Python 3.10 or later and the [Claude Code](https://claude.com/claude-code) command-line
+tool, installed and logged in. backspec uses that login; you do not need to configure an API key.
+
+From a clone of this repository, create a virtual environment and install backspec:
 
 ```bash
-backspec extract ./repo --include "src/**" --exclude "**/migrations/**" -o reqs.json
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -e .
 ```
 
-To check the grouping before the expensive stages run, propose the capabilities first. This
-writes `backspec.capabilities.yaml` at the root of the repository, which you can edit.
-`backspec extract` then uses the file and skips the orient call, on this and every later run.
+Replace `./my-service` below with the path to the codebase you want to understand.
+First, preview the files and estimated token usage. This sends nothing to a model:
 
 ```bash
-backspec orient ./repo          # writes ./repo/backspec.capabilities.yaml; --force replaces it
-backspec extract ./repo         # uses the file; --capabilities PATH picks another
-backspec extract ./repo --gate  # orient if there is no file, write it, and stop
+backspec extract ./my-service --dry-run
 ```
 
-A file that breaks the rules (unique ids of lowercase letters, digits and underscores; a name
-for each) is refused with every problem listed. `plumbing` is added if it is missing. Which
-observation belongs to which capability is not stored; it is redone on each run. A gated run
-returns no requirements, with `run.status` `partial` and `run.stopped_after` `capabilities`.
-
-A run reports its tokens (`run.input_tokens`, `run.output_tokens`, and `run.usage_by_stage`).
-A backend that reports usage is used as it is; otherwise tokens are estimated as characters / 4
-and `run.tokens_estimated` is true. Cached replies count as zero tokens. `--dry-run` prints an
-estimate of the tokens the observe stage would read. `--max-tokens N` is a soft budget: a call is
-not sent if the tokens already used, plus those reserved for calls in flight, plus its own
-estimated cost would pass N. The run is then `partial` with `run.budget_reached` true, and exits 1.
-A run can overshoot N by the amount the calls in flight turned out dearer than estimated.
+Then extract the requirements and create a report:
 
 ```bash
-backspec extract ./repo --max-tokens 400000
+backspec extract ./my-service -o reqs.json
+backspec render reqs.json --format html -o reqs.html
 ```
+
+Keep `reqs.json`: it contains the full result and lets you create other formats or reuse work
+on later runs. Open `reqs.html` in a browser to review the requirements and their evidence.
+For all available options, run `backspec --help` or `backspec extract --help`.
+
+### Choose which files to read
+
+Use gitignore-style patterns to focus on part of a project. You can repeat `--include` and
+`--exclude`; an exclusion always takes precedence.
+
+```bash
+backspec extract ./my-service --include "src/**" --exclude "**/migrations/**" -o reqs.json
+```
+
+## Review and update requirements
+
+### Choose how requirements are grouped
+
+backspec can propose capabilities before it writes requirements. Edit the proposed groups
+in `./my-service/backspec.capabilities.yaml`, then run extraction:
+
+```bash
+backspec orient ./my-service
+# Edit ./my-service/backspec.capabilities.yaml, then:
+backspec extract ./my-service -o reqs.json
+```
+
+Later runs use this file automatically. Use `orient --force` to replace it, or
+`extract --capabilities PATH` to use a different file.
+
+Each capability needs a unique id made of lowercase letters, digits and underscores, plus a
+name. Invalid files are rejected with all problems listed. backspec adds a `plumbing` group
+if it is missing.
+
+To pause an extraction for this review, use `backspec extract ./my-service --gate`.
+It writes the capabilities file if needed and stops before assigning facts or writing
+requirements. The result has no requirements, with `run.status` set to `partial` and
+`run.stopped_after` set to `capabilities`.
+
+### Confirm, edit or reject a requirement
+
+Record your decisions so later extractions can apply them. Replace `REQ-a4ae6fab` with an id
+from your result and choose the action you need:
+
+```bash
+# Confirm a requirement.
+backspec review reqs.json REQ-a4ae6fab --confirm --reviewer ana --review ./my-service/backspec.review.yaml
+
+# Edit its statement and conditions.
+backspec review reqs.json REQ-a4ae6fab --statement "Managers may adjust stock." --condition "Never below zero." --review ./my-service/backspec.review.yaml
+
+# Reject it, with a reason.
+backspec review reqs.json REQ-a4ae6fab --reject --note "Not a requirement" --review ./my-service/backspec.review.yaml
+```
+
+The explicit `--review` path saves decisions in the codebase being analysed, where the next
+extraction finds them automatically:
+
+```bash
+backspec extract ./my-service -o reqs.json
+```
+
+Without `--review`, the review command writes `backspec.review.yaml` in your current directory.
+For extraction, `--review PATH` selects a different review file.
+
+Rejected requirements remain in the result under `hidden`, with counts in `diagnostics.review`.
+If the cited code changes after a decision, the requirement returns as `needs_review`.
+Decisions that no longer match a requirement are listed as stale.
+
+backspec matches requirements between runs by overlap in their cited code, so a reworded
+statement can keep its id.
+
+### Reuse work when the code changes
+
+Run extraction again with the same output path:
+
+```bash
+backspec extract ./my-service -o reqs.json
+```
+
+backspec uses the existing JSON result to avoid repeating work. You can also choose an earlier
+result with `--previous FILE`.
+
+- Unchanged files keep their observations and initial screening decisions.
+- Changed files are read around the changed lines. Observations from untouched lines are kept,
+  and their citations move with the code.
+- Previous capabilities are reused unless a capabilities file overrides them.
+- Groups with unchanged observations keep their requirements and support assessments.
+
+If nothing has changed, no model is called and the same requirements are returned. Results
+made with a different prompt version are not reused. Use `--no-reuse` to read everything again.
+
+### Find requirements affected by code changes
+
+To check a saved result without calling a model:
+
+```bash
+backspec status reqs.json --root ./my-service
+```
+
+The command lists requirements whose cited files have changed (`stale`) or disappeared
+(`source_missing`). A changed file means the requirement needs another look; it does not by
+itself mean the requirement is broken.
+
+Use `--json` for a machine-readable report. The exit code is 0 when everything is current,
+1 when something is stale or missing, and 2 when the input is not a valid result file.
+
+### Check result quality and file coverage
+
+```bash
+backspec validate reqs.json
+backspec validate reqs.json --strict
+backspec coverage reqs.json
+```
+
+`validate` checks the result's structure and applies checks that do not use a model. Invalid
+citations, unknown capabilities and duplicate ids are errors. Vague statements, statements
+combining several requirements, and weak support are warnings. The same checks run during
+extraction and are saved in `diagnostics.lint`.
+
+Validation exits 0 when there are no errors, 1 when there are errors, and 2 for an invalid
+result file. With `--strict`, warnings also cause exit code 1. Use `--json` for the findings
+as JSON.
+
+`coverage` shows how files were handled, which observations were unused, and files that may
+need attention. Use `--all` for the full list or `--json` for structured output.
+
+## Export and share results
+
+JSON is the full saved result. You can turn it into any of these formats without another
+model call:
+
+| Format | Use it for |
+| --- | --- |
+| Markdown (`md`) | Reading or editing requirements grouped by capability, with conditions, evidence and scenarios. This is the default for `render`. |
+| HTML (`html`) | Browsing a report offline, opening requirements to inspect their evidence, and finding items that need review. |
+| CSV (`csv`) | Working in a spreadsheet, with one row per requirement and citation. Add `--include-hidden` to include rejected requirements. |
+| OpenSpec (`openspec`) | Creating a specification directory with one file per capability. See the export rules below. |
 
 ```bash
 backspec render reqs.json -o REQUIREMENTS.md
-backspec render reqs.json --format csv -o reqs.csv            # one row per requirement and evidence pair
-backspec render reqs.json --format openspec -o spec/          # a directory; -o is required
-backspec render reqs.json --format html -o reqs.html --title "My shop"   # one page, opens offline
-backspec extract ./repo --format csv -o reqs.csv
+backspec render reqs.json --format html -o reqs.html --title "My service"
+backspec render reqs.json --format csv -o reqs.csv
+backspec render reqs.json --format openspec -o spec/
 ```
 
-Formats: `json`, `md` (default for `render`), `csv`, `html` and `openspec`; an unknown name is refused with
-the list. `csv` adds `--include-hidden` (a `hidden` column). `openspec` writes
-`specs/<capability>/spec.md`, `NOT_EXPORTED.md` and `README.md`. Only requirements with support
-`direct` or `partial` are exported, and, with `--strict` (the default), only those with a scenario.
-A scenario comes only from a test or example in the code and cites it; backspec never writes one to fill
-a gap. `--no-strict` keeps a requirement with no scenario and marks it as having none. A format is
-a function in `modules/report/renderers.py`, added to `RENDERERS`.
+You can also extract straight to another format, for example
+`backspec extract ./my-service --format csv -o reqs.csv`. Keep a JSON result if you want to
+reuse it on later runs. `backspec schema` prints the result's JSON Schema.
+
+The HTML report's "To review" section includes requirements with less than direct support,
+plus expandable open questions, validation findings and failures. "Coverage" shows each
+file's state. The page loads nothing from the network; its design is described in
+[`DESIGN.md`](DESIGN.md).
+
+OpenSpec exports write `specs/<capability>/spec.md`, `NOT_EXPORTED.md` and `README.md`.
+They include only requirements with `direct` or `partial` support. By default, a requirement
+must also have a scenario drawn from a cited test or example in the source. backspec does
+not invent scenarios. Use `--no-strict` to include requirements without scenarios and label
+that omission. This format requires an output directory via `-o`.
+
+## Manage cost
+
+Preview a run or set a token budget:
 
 ```bash
-backspec status reqs.json --root ./repo
+backspec extract ./my-service --dry-run
+backspec extract ./my-service --max-tokens 400000 -o reqs.json
 ```
 
-`status` compares a saved result with the files on disk and lists the requirements whose cited
-files have changed (`stale`) or gone (`source_missing`). It calls no model. Exit code 0 when
-everything is current, 1 otherwise, 2 for a file that is not a result. `--json` prints the
-report as JSON; in Python, `backspec.status(result_or_path, root)` returns it.
+The budget is a soft limit. Before each model call, backspec adds the tokens already used,
+the tokens reserved for calls in progress, and the estimate for the new call. If the total
+would exceed the limit, it does not send the new call. The run is marked `partial`,
+`run.budget_reached` is set to true, and the command exits 1. Calls already in progress can
+still exceed the budget if they use more tokens than estimated.
+
+Every run records input and output tokens and usage by stage in `run.input_tokens`,
+`run.output_tokens` and `run.usage_by_stage`. Cost is included when the model backend reports
+it. When usage is unavailable, backspec estimates tokens as characters divided by four and
+sets `run.tokens_estimated` to true. Cached replies count as zero usage.
+
+### Inspect or clear cached model replies
+
+backspec caches replies using the full prompt, so an identical request can reuse a previous
+reply. Use `--replay` to require cached replies and fail on any cache miss.
 
 ```bash
-backspec validate reqs.json            # lint: exit 0 clean (warnings allowed), 1 errors, 2 not a result
-backspec validate reqs.json --strict   # warnings count as errors; --json prints the findings
-backspec coverage reqs.json            # files per state, unused observations, files worth a look; --all, --json
-backspec cache info ./repo             # the cache folder, replies per stage, size; --cache-dir PATH
-backspec cache clear ./repo --yes      # without --yes, only reports what it would delete
+backspec cache info ./my-service
+backspec cache clear ./my-service --yes
 ```
 
-`validate` checks a saved result against the schema, then runs deterministic checks: errors for
-a citation that points at nothing, an unknown capability or a duplicate id, warnings for vague,
-compound or weakly supported requirements. Every extraction runs the same checks and stores the
-findings in `diagnostics.lint`. In Python, `backspec.validate(result_or_path)` returns the report.
-`coverage` reads only the saved result. `cache clear` deletes only files named
-`<stage>-<hex>.json` and refuses a folder that holds anything else.
+`cache info` shows the cache folder, replies per stage and size. Use `--cache-dir PATH` to
+select a different folder. Without `--yes`, `cache clear` only reports what it would delete.
+It deletes only files named `<stage>-<hex>.json` and refuses folders containing anything else.
 
-Requirement ids last between runs: a run carries them forward from the previous result by how
-much the cited code overlaps, so rewording a statement keeps its id. `-o` names the previous
-result when that file already exists, or give `--previous FILE`. Record a decision, and the next
-run applies it. The entry goes in `backspec.review.yaml` (or `--review PATH`).
+## How extraction works
 
-```bash
-backspec review reqs.json REQ-1a2b3c4d --confirm --reviewer ana
-backspec review reqs.json REQ-1a2b3c4d --statement "Managers may adjust stock." --condition "Never below zero."
-backspec review reqs.json REQ-1a2b3c4d --reject --note "Not a requirement"
-backspec extract ./repo -o reqs.json
-```
+backspec first collects observations from the source, then turns them into requirements.
+The model reads code and writes statements. The program checks quotes, copies citations
+and records what happened to each file.
 
-A rejected requirement is hidden and counted in `diagnostics.review`. If the cited code changed
-since the decision, it comes back as `needs_review`. Entries that match nothing are listed as stale.
+![The backspec pipeline: find and screen files, collect and verify observations, group them into capabilities, write requirements, assess support, apply review decisions and report results.](docs/pipeline.svg)
+
+1. **Find files.** Apply the include and exclude patterns, then snapshot the files to read.
+2. **Screen files, called triage.** A fast model looks at each file's path, size and first
+   40 lines. It can skip files it judges to contain no user-visible behaviour. A sample is
+   read anyway to check those decisions. Adjust the sample with `--triage-audit`, or use
+   `--no-triage` to read every selected file in full.
+3. **Collect observations.** A fast model reads the selected files with line numbers and
+   reports individual facts, each with a line range and an exact quote.
+4. **Verify quotes.** The program keeps an observation only if its quote is present in the file.
+5. **Group observations.** Propose capabilities or load your capabilities file, then assign
+   observations to those groups.
+6. **Write requirements.** A stronger model writes requirements using observation ids.
+   The program copies the corresponding source locations into citations.
+7. **Assess support.** A separate model call judges how well the cited code supports each statement.
+8. **Apply your review.** Apply recorded confirmations, edits and rejections.
+9. **Report results.** Include requirements, observations, file coverage and rejected items.
+
+### What the checks establish
+
+Every citation points to real lines in the source snapshot. Files that are excluded, skipped
+or fail are accounted for, and a run with a failed stage is marked `partial`. Evidence that
+only shows something exists cannot earn a rating above `insufficient`.
+
+These checks do not establish that a requirement is true, that all requirements have been
+found, or that the cited code can actually run. backspec reads code; it does not execute it.
+The support assessment remains a model's judgement.
+
+For integrations, each file has exactly one state in the result: `excluded`, `skipped`,
+`triaged_out`, `extracted`, `no_requirements`, `candidates_rejected` or `failed`.
+
+## Use backspec from Python
 
 ```python
 from backspec import Config, extract
 
-result = extract("./repo", Config(include=["src/**"]))
+result = extract("./my-service", Config(include=["src/**"]))
 for requirement in result.requirements:
     print(requirement.id, requirement.support, requirement.statement)
 ```
 
-```python
-from backspec import orient
+`backspec.status(result_or_path, root)` checks for changed source files.
+`backspec.validate(result_or_path)` checks a saved result's structure and quality.
 
-for capability in orient("./repo"):   # writes the capabilities file
-    print(capability.id, capability.name)
-```
+## Choose a model backend
 
-The default model backend is the Claude Code CLI, using the login you already have. It must be
-installed. `--provider codex` uses the Codex CLI instead (`codex exec`, read-only sandbox, prompt on
-stdin). **That adapter has not been run against the real Codex CLI**: it was written from the
-documented interface and tested only against a fake `codex` script; its flags are listed in
-`src/backspec/host/adapters/codex.py` and should be checked first. To use anything else, pass an object with a `complete(request) -> str` method as
-`Config(provider=...)`.
+The default backend uses the Claude Code command-line tool with tools and settings disabled.
+Haiku handles file screening, observations and grouping. Sonnet writes requirements and
+assesses support. Use `--fast-model` and `--model` to change these choices.
 
-A model does not describe the same file the same way twice, so backspec asks it only about what
-is new. When a previous result is available (`--previous FILE`, or the `-o` file if it already
-exists):
+`--provider codex` selects the Codex command-line tool, using `codex exec` with a read-only
+sandbox and the prompt on standard input. **This adapter has only been tested against a fake
+`codex` script, not the real CLI.** Check its flags in
+[`src/backspec/host/adapters/codex.py`](src/backspec/host/adapters/codex.py) before relying on it.
 
-- a file that has not changed keeps the observations that result made of it and is not read again,
-  and keeps its triage verdict and is not triaged again;
-- in a file that has changed, only the changed lines are read again, with some context; an
-  observation whose cited lines are untouched stays, and its citation moves with the code;
-- the capabilities are the previous ones, unless there is a capabilities file;
-- an observation already placed in a capability stays there;
-- a capability whose observations are all the same keeps its requirements and their support verdicts.
+To supply another backend from Python, pass an object with a `complete(request) -> str` method
+as `Config(provider=...)`.
 
-A run with nothing changed calls no model and returns the same requirements. An edit rewrites
-only the capabilities whose cited code it touched. Anything made with a
-different prompt is not reused, and `--no-reuse` starts from nothing.
+## Optional language-aware parsing
 
-A requirement rejected in review is left out of `requirements` and kept under `hidden`.
-
-## How it works
-
-1. **Discover.** List the files, apply the include and exclude patterns, take one snapshot of
-   each file that will be read.
-2. **Triage.** A fast model looks at each file's path, size and first 40 lines and gives its
-   role, how likely it is to hold behaviour a user would notice, and whether it is sure. The
-   program skips a file only when the relevance is `none` and the model is sure; anything else,
-   including a file the model did not answer for, is read. A skipped file is `triaged_out`, with
-   its role as the reason. A fraction of the skipped files (`--triage-audit`, default 0.1, at
-   least 5 and at most 50) is read anyway, chosen by hash so the choice is the same every run;
-   `coverage.triage_audit` says how many of them held a verified observation, with a 95 percent
-   confidence interval for the miss rate. `--no-triage` reads everything.
-3. **Observe.** Show a model every line of each file to be read, each with its real line number,
-   and collect single facts with a line range and a verbatim quote.
-4. **Verify.** Keep an observation only if its quote is really in the file. No model is involved.
-5. **Orient and assign.** Propose capabilities (or read them from the capabilities file), then place each observation in one. Grouping is
-   by observation, not by file.
-6. **Synthesise.** Write requirements per capability. A requirement names observations by id
-   and the program copies their locations, so a model never writes a citation at this step.
-7. **Assess support.** A second call judges whether the cited lines establish the statement:
-   `direct`, `partial`, `insufficient` or `conflicting`.
-8. **Report.** Requirements, observations, a state and reason for every file, and what was
-   rejected along the way.
-
-Triaging, observing, orienting and assigning use a fast model. Synthesis and the support check use a
-strong one.
-
-## What it guarantees, and what it does not
-
-Guaranteed, whatever the model says:
-
-- Every citation in the output resolves to real lines in the file as it was read.
-- Every file under the root is in exactly one state: `excluded`, `skipped`, `triaged_out`,
-  `extracted`, `no_requirements`, `candidates_rejected` or `failed`.
-- A requirement whose evidence only shows that something exists is never rated above
-  `insufficient`.
-- A run in which any stage failed is marked `partial`.
-
-Not guaranteed:
-
-- That a requirement is true. The support verdict is a model's judgement.
-- That all requirements were found. File coverage is not completeness.
-- That cited code is reachable. backspec reads code and does not run it.
-
-## Optional syntax support
-
-backspec needs no parser. If `tree-sitter-language-pack` is installed (`pip install "backspec[treesitter]"`),
-files in Python, JavaScript, TypeScript, TSX, Go, Java, Ruby, Rust, C# and PHP are analysed with it:
-
-- a large file is cut between top-level functions and classes, not inside one;
-- each observation, and the evidence copied from it, names the innermost function, method or class
-  that holds its whole line range (`symbol`, set in code); the Markdown shows it as
-  `path:10-14` (Shop.buy);
-- `coverage.files[].analysis` says `syntax` or `text` for each file, and `run.syntax_files` and
-  `run.text_files` count them.
-
-Without the package, for another language, or when parsing fails, a file is read as text, as
-before. `backspec extract --text-only` (`Config(syntax=False)`) does that even when it is installed.
-Observations made one way are not reused by a run made the other way.
-
-## Layout
-
-One module per capability under `src/backspec/modules/`, each with a `domain.py`, `use_cases.py`
-and a small `facade.py`, plus `ports.py` where it needs the outside world. Adapters and wiring
-live in `src/backspec/host/`. The import rules are enforced by `tests/test_architecture.py`.
+backspec can read files as plain text without a parser. To help it split large files at
+function and class boundaries, install the optional parser from your clone:
 
 ```bash
+python3 -m pip install -e '.[treesitter]'
+```
+
+This uses `tree-sitter-language-pack` for Python, JavaScript, TypeScript, TSX, Go, Java, Ruby,
+Rust, C# and PHP. It also adds the enclosing function, method or class name to observations
+and citations as `symbol`. The field `coverage.files[].analysis` records whether a file was
+read using `syntax` or `text` analysis.
+
+Other languages, missing parsers and parsing failures fall back to plain text. Use
+`--text-only`, or `Config(syntax=False)` in Python, to always read files as text.
+
+## Project status
+
+This is an early release. It has been run end to end on a small slice of a real Python
+codebase. Its automated tests use a fake model, and the accuracy of the extracted requirements
+has not yet been checked by a person. The Codex adapter has not been tested with the real CLI.
+
+## Development
+
+Install the development dependencies and run the tests:
+
+```bash
+python3 -m pip install -e '.[dev]'
 python3 -m pytest -q
 ```
 
-## The HTML report
+Each capability lives under `src/backspec/modules/`, with rules and models in `domain.py`,
+workflows in `use_cases.py`, a small public interface in `facade.py`, and external interfaces
+in `ports.py` where needed. File access, model backends and application wiring live in
+`src/backspec/host/`. Import boundaries are checked by `tests/test_architecture.py`.
+See [`AGENTS.md`](AGENTS.md) for contribution rules.
 
-`--format html` writes one self-contained page that loads nothing from the network. It shows little
-at a time: the overview lists the capabilities and a search box; a capability lists its
-requirements as single sentences; a requirement opens to its conditions, scenarios and cited lines.
-"To review" holds the requirements below direct support and, folded away, open questions, lint
-findings and failures. "Coverage" lists the files by state, folded, with the run's details.
-
-The template is `src/backspec/templates/report.html`. Its look follows `DESIGN.md` at the root of this
-repository (the ThoughtStream design system from designmd.ai); the heading font, Libre Baskerville
-(OFL), is embedded in the page.
-
-## Not verified
-
-The Codex adapter has never been run against the real `codex` CLI. Requirement precision has not
-been checked by a person. See the spec.
+To add an output format, add a function to `src/backspec/modules/report/renderers.py` and
+register it in `RENDERERS`.
 
 ## Licence
 
-MIT; see `LICENSE`. The HTML report embeds the Libre Baskerville font, which is under the SIL Open
-Font Licence (`src/backspec/templates/libre-baskerville-OFL.txt`).
+MIT; see [`LICENSE`](LICENSE). The HTML report embeds the Libre Baskerville font under the
+[SIL Open Font Licence](src/backspec/templates/libre-baskerville-OFL.txt).
