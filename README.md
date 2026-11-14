@@ -229,3 +229,8 @@ repository (the ThoughtStream design system from designmd.ai); the heading font,
 
 The Codex adapter has never been run against the real `codex` CLI. Requirement precision has not
 been checked by a person. See the spec.
+
+## Licence
+
+MIT; see `LICENSE`. The HTML report embeds the Libre Baskerville font, which is under the SIL Open
+Font Licence (`src/reqx/templates/libre-baskerville-OFL.txt`).

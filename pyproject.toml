@@ -8,6 +8,8 @@ version = "0.0.1"
 description = "Extract user requirements from a codebase, with verified citations and a per-file account of what was read."
 readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE", "src/reqx/templates/libre-baskerville-OFL.txt"]
 dependencies = ["pydantic>=2.6", "typer>=0.12", "pathspec>=0.12", "pyyaml>=6"]
 
 [project.optional-dependencies]
