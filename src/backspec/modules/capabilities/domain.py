@@ -11,6 +11,15 @@ from pydantic import BaseModel, Field
 PLUMBING = "plumbing"
 UNASSIGNED = "unassigned"
 ID_PATTERN = re.compile(r"[a-z0-9_]+")
+# Kinds of observation that are, by what they are, noticed by a user, an operator or a calling
+# system: a refusal, a change, what is shown. None of them is internal mechanics.
+NOTICEABLE = frozenset({"entry_point", "permission", "validation", "state_change", "error_path", "display",
+                        "test_case"})
+
+
+def belongs_in_plumbing(kind: str) -> bool:
+    """Whether an observation of this kind may be placed in `plumbing`, which is never written up."""
+    return kind not in NOTICEABLE
 
 
 class CapabilitiesFileError(ValueError):
@@ -34,7 +43,7 @@ class AssignReply(BaseModel):
 
 def listing(observations: list[tuple[str, str, str]]) -> str:
     """Observations as `id | statement` lines under a `## path` header per file.
-    Each item is (id, path, statement)."""
+    Each item is (id, path, statement); the statement may carry the kind in front of it."""
     out: list[str] = []
     current = None
     for obs_id, path, statement in observations:
@@ -101,8 +110,13 @@ def parse_capabilities(data: object, source: str) -> list[Capability]:
     return with_plumbing(found)
 
 
+def standard_plumbing() -> Capability:
+    return Capability(id=PLUMBING, name="Internal mechanics",
+                      summary="Machinery no user, operator or calling system would notice: never a refusal, an error, "
+                              "a permission, a change that is saved, or anything shown.")
+
+
 def with_plumbing(capabilities: list[Capability]) -> list[Capability]:
     if any(c.id == PLUMBING for c in capabilities):
         return list(capabilities)
-    return [*capabilities, Capability(id=PLUMBING, name="Internal mechanics",
-                                      summary="Machinery no user or operator would notice.")]
+    return [*capabilities, standard_plumbing()]

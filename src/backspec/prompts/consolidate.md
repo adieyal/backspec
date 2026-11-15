@@ -3,7 +3,8 @@
 You are given the requirements already written for one capability of a software product. Each
 has an id, a statement, its conditions, and the ids of the observations it cites. Many of them
 are too fine: the same behaviour written several times, or one behaviour cut into pieces.
-Your job is to say which requirements are the same behaviour and should become one.
+Your job is to say which requirements are the same behaviour and should become one. `from`
+lists the places (file, and function where known) each requirement's evidence comes from.
 
 ## What to merge
 
@@ -16,13 +17,16 @@ Merge requirements that:
 - show the same behaviour from different places (the check, the screen, the report, the test).
 
 Do not merge requirements that a reviewer would test separately, or that have different actors
-or different outcomes. When in doubt, leave it out. A requirement you do not mention is kept
+or different outcomes. Do not merge requirements about different operations (different views,
+endpoints or commands, as their `from` shows) when they differ in any rule, permission, order,
+message or outcome. When in doubt, leave it out. A requirement you do not mention is kept
 unchanged.
 
 ## How to write a merged requirement
 
 - `statement`: one complete statement of the rule, at the level of the product. Use only what
-  the merged statements say. Do not add reasons or outcomes they do not state.
+  the merged statements say. Do not add reasons or outcomes they do not state, and do not
+  leave out a condition any of them states.
 - `conditions`: the conditions of the merged requirements, joined and without repeats. Keep
   the cases that distinguish the rule's variants.
 - `level`: `user`, `system` or `technical`, as for the requirements merged.

@@ -280,6 +280,9 @@ noscript p { font-size: 15px; color: var(--muted) }
     if (rej.length) folds.push(fold("Observations whose citation did not check out", rej.length, el("ul", { class: "rows" }, rej.map(function (r) {
       return el("li", {}, [el("span", { class: "text", text: r.statement }), el("span", { class: "caption", text: r.path + "  ·  " + r.reason })]); }))));
     if ((D.hidden || []).length) folds.push(fold("Rejected by a reviewer", D.hidden.length, el("ul", { class: "rows" }, D.hidden.map(function (r) { return el("li", {}, [el("span", { class: "text", text: r.statement })]); }))));
+    var unobs = diag.unobserved_functions || {}, unobsRows = [];
+    Object.keys(unobs).forEach(function (p) { unobs[p].forEach(function (fn) { unobsRows.push(el("li", {}, [el("span", { class: "text", text: fn }), el("span", { class: "path caption", text: p })])); }); });
+    if (unobsRows.length) folds.push(fold("Functions no observation covers", unobsRows.length, el("ul", { class: "rows" }, unobsRows)));
     var failed = Object.assign({}, diag.failed_stages || {}, diag.failed_capabilities || {}, diag.unconsolidated || {}, diag.triage_unresolved || {}), names = Object.keys(failed);
     if (names.length) folds.push(fold("Steps that failed", names.length, el("ul", { class: "rows" }, names.map(function (k) {
       return el("li", {}, [el("span", { class: "text", text: capName[k] || k }), el("span", { class: "caption", text: String(failed[k]) })]); }))));
@@ -298,6 +301,7 @@ noscript p { font-size: 15px; color: var(--muted) }
     box.appendChild(el("div", {}, groups.map(function (g) {
       return fold(g[0][1].charAt(0).toUpperCase() + g[0][1].slice(1), g[1].length, el("ul", { class: "rows" }, g[1].map(function (f) {
         var said = f.observations ? plural(f.observations, "observation") + (f.cited_by ? ", cited by " + plural(f.cited_by, "requirement") : ", cited by none") : (f.reason || "");
+        if (f.read === "in_part" && f.lines_read) said = "read in part: " + f.lines_read + " of " + f.lines + " lines, " + plural(f.reached, "symbol") + " reached" + (said ? "  ·  " + said : "");
         return el("li", {}, [el("span", { class: "path", text: f.path }), said ? el("span", { class: "caption", text: said }) : null]); }))); })));
     var more = [], unused = (D.coverage && D.coverage.unused_observations) || {}, names = Object.keys(unused).filter(function (k) { return unused[k]; });
     if (names.length) more.push(fold("Evidence no requirement used", names.reduce(function (a, k) { return a + unused[k]; }, 0), el("ul", { class: "rows" }, names.map(function (k) {
@@ -306,11 +310,25 @@ noscript p { font-size: 15px; color: var(--muted) }
     if (audit && audit.skipped) more.push(fold("Check on the skipped files", audit.audited + " of " + audit.skipped, el("p", { class: "quiet", style: "padding-bottom:24px",
       text: plural(audit.audited, "skipped file") + (audit.audited === 1 ? " was" : " were") + " read anyway, and " + (audit.yielded ? audit.yielded + " held evidence." : "none held evidence.") +
         (audit.miss_rate_interval ? " With a sample this size, between " + Math.round(audit.miss_rate_interval[0] * 100) + "% and " + Math.round(audit.miss_rate_interval[1] * 100) + "% of skipped files could hold evidence." : "") })));
+    var fol = D.follow;
+    if (fol && (fol.files || []).length) {
+      var rows = (fol.reached || []).map(function (r) { return el("li", {}, [el("span", { class: "text", text: r.symbol + "  (lines " + r.lines[0] + "-" + r.lines[1] + ")" }),
+        el("span", { class: "path caption", text: r.path + "  ·  depth " + r.depth + ", called from " + r.called_from.join(", ") })]); });
+      (fol.skipped || []).forEach(function (n) { rows.push(el("li", {}, [el("span", { class: "text", text: "Not followed: " + n.name }),
+        el("span", { class: "caption", text: (n.reason === "generic" ? "too common a name to tell which is meant" : "defined " + n.definitions + " times") + "  ·  called from " + n.called_from.join(", ") })])); });
+      (fol.ambiguous || []).forEach(function (n) { rows.push(el("li", {}, [el("span", { class: "text", text: "Followed to every match: " + n.name }),
+        el("span", { class: "caption", text: n.definitions.join(", ") })])); });
+      if (fol.unavailable) rows.unshift(el("li", {}, [el("span", { class: "text", text: fol.unavailable })]));
+      more.push(fold("Read in part, following calls", (fol.files || []).map(function (f) { return f.lines_read + " of " + f.lines + " lines"; }).join(", "),
+        el("div", {}, [el("p", { class: "quiet", text: "Files named by --follow are read only where the selected files call into them, up to " + fol.depth + " calls away. Calls are matched by name, so a match can be wrong; names too common or defined too often are not followed." }),
+          el("ul", { class: "rows" }, rows)])));
+    }
     var facts = [["Status", run.status + (run.stopped_after ? ", stopped after " + run.stopped_after : "") + (run.budget_reached ? ", token budget reached" : "")], ["Model backend", run.provider],
       ["Model calls", run.calls != null ? run.calls + (run.cached_calls ? " (and " + run.cached_calls + " from cache)" : "") : null],
       ["Tokens", run.input_tokens || run.output_tokens ? (run.input_tokens + run.output_tokens).toLocaleString() + (run.tokens_estimated ? " (estimated)" : "") : null],
       ["Cost", run.cost_usd ? "$" + run.cost_usd.toFixed(2) : null],
       ["Reused", run.reused_files ? plural(run.reused_files, "unchanged file") : null],
+      ["Read in part", run.followed_files ? plural(run.followed_files, "followed file") : null],
       ["Parsed", run.syntax_files ? run.syntax_files + " of " + (run.syntax_files + (run.text_files || 0)) + " files with tree-sitter" : null],
       ["Observations", (D.observations || []).length ? (D.observations || []).length + " verified" : null], ["backspec", run.tool_version]].filter(function (f) { return f[1] != null && f[1] !== "undefined"; });
     more.push(fold("About this run", "", el("dl", { class: "facts" }, facts.reduce(function (a, f) { return a.concat([el("dt", { text: f[0] }), el("dd", { text: String(f[1]) })]); }, []))));

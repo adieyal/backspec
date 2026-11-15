@@ -21,7 +21,9 @@ from backspec.kernel.llm import LLMError, LLMPort
 from backspec.modules.capabilities.facade import CapabilitiesFacade, Capability
 from backspec.modules.discovery.facade import DiscoveryFacade
 from backspec.modules.evidence.facade import EvidenceFacade
-from backspec.modules.extraction.facade import Progress, Settings, orient_only, run
+from backspec.modules.discovery.facade import Discovery
+from backspec.modules.extraction.facade import Progress, Settings, orient_only, plan_follow, run
+from backspec.modules.reach.facade import DEFAULT_DEPTH, FollowReport, ReachFacade
 from backspec.modules.lint.facade import LintReport, lint
 from backspec.modules.report.facade import ExtractionResult
 from backspec.modules.requirements.facade import RequirementsFacade
@@ -57,6 +59,8 @@ class Config:
     reuse: bool = True                # keep whatever the previous result settled and whose inputs have not changed
     triage: bool = True               # look at each file first; skip those a model is sure hold no behaviour
     triage_audit: float = 0.1         # share of the skipped files read anyway: 0 is off, 1.0 reads them all
+    follow: list[str] = field(default_factory=list)   # files read only where the selected files call into them
+    follow_depth: int = DEFAULT_DEPTH  # calls away from the selected files to follow
 
 
 def default_cache_dir(root: Path) -> Path:
@@ -89,7 +93,8 @@ def _wiring(path: str | Path, config: Config):
     llm = CachedLLM(inner, directory, config.replay, config.max_tokens)
     settings = Settings(include=config.include, exclude=config.exclude, default_excludes=config.default_excludes,
                         assess_support=config.assess_support, gate=config.gate,
-                        triage=config.triage, triage_audit=config.triage_audit)
+                        triage=config.triage, triage_audit=config.triage_audit,
+                        follow=config.follow, follow_depth=config.follow_depth)
     store = YamlCapabilitiesFile(config.capabilities_file or root / CAPABILITIES_FILE)
     return root, name, llm, settings, store
 
@@ -116,7 +121,21 @@ def extract(path: str | Path, config: Config | None = None, progress: Progress =
                capabilities=CapabilitiesFacade(llm, config.concurrency, store),
                requirements=RequirementsFacade(llm, config.concurrency),
                usage=llm.usage, spend=llm.spend, progress=progress, review=ReviewFacade(review_store), before=before,
-               reuse=config.reuse, triage=TriageFacade(llm, config.concurrency))
+               reuse=config.reuse, triage=TriageFacade(llm, config.concurrency), reach=_reach(config))
+
+
+def _reach(config: Config) -> ReachFacade:
+    return ReachFacade(TreeSitterSyntax.load() if config.syntax else None)
+
+
+def preview(path: str | Path, config: Config | None = None) -> tuple[Discovery, FollowReport | None]:
+    """What a run would read, without calling a model: the files, and with `follow` the parts of
+    the followed files the selected files reach. Triage is not run, so every selected file counts."""
+    config = config or Config()
+    found = DiscoveryFacade(DiskRepo(Path(path))).discover(config.include, config.exclude, config.default_excludes,
+                                                          config.follow)
+    settings = Settings(follow=config.follow, follow_depth=config.follow_depth)
+    return found, plan_follow(settings, list(found.files), found.followed, _reach(config), lambda _: None)
 
 
 def status(result: ExtractionResult | str | Path, root: str | Path = ".") -> StatusReport:

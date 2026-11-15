@@ -340,7 +340,7 @@ def test_a_large_file_reaches_the_model_cut_between_functions():
     llm = FakeLLM({"observe": lambda prompt: {"observations": [], "none": []}})
     text = "\n".join(lines)
     observe_files([SourceFile("big.py", text, "sha256:x")], llm, batch_lines=100, syntax=AstSyntax())
-    shown = [r.prompt for r in llm.requests]
+    shown = [r.prompt for r in llm.requests if r.stage == "observe"]   # not the second look at functions left empty
     assert len(shown) > 1
     seen = []
     for prompt in shown:

@@ -16,6 +16,7 @@ from backspec.modules.capabilities.facade import PLUMBING, UNASSIGNED, Capabilit
 from backspec.modules.discovery.facade import DiscoveryFacade
 from backspec.modules.evidence.facade import EvidenceFacade
 from backspec.modules.lint.facade import lint_findings
+from backspec.modules.reach.facade import DEFAULT_DEPTH, FollowReport, ReachFacade
 from backspec.modules.report.facade import Diagnostics, ExtractionResult, Run, StageUsage, build_coverage, earlier_evidence, earlier_triage
 from backspec.modules.requirements.facade import Requirement, RequirementsFacade
 from backspec.modules.review.facade import ReviewFacade, ReviewSummary
@@ -34,13 +35,16 @@ class Settings:
     gate: bool = False   # stop once the capabilities are settled, before assignment and synthesis
     triage: bool = True            # a cheap first look; files surely of no relevance are not read in full
     triage_audit: float = DEFAULT_AUDIT   # share of the skipped files read anyway; 0 is off, 1.0 reads them all
+    follow: list[str] = field(default_factory=list)   # files read only where the selected files call into them
+    follow_depth: int = DEFAULT_DEPTH                 # how many calls away from the selected files to follow
 
 
 def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade, evidence: EvidenceFacade,
         capabilities: CapabilitiesFacade, requirements: RequirementsFacade,
         usage: Callable[[], tuple[int, int]] = lambda: (0, 0), progress: Progress = lambda _: None,
         review: ReviewFacade | None = None, before: ExtractionResult | None = None,
-        reuse: bool = True, spend: Callable[[], Spend] = Spend, triage: TriageFacade | None = None) -> ExtractionResult:
+        reuse: bool = True, spend: Callable[[], Spend] = Spend, triage: TriageFacade | None = None,
+        reach: ReachFacade | None = None) -> ExtractionResult:
     """`before` is the previous result, if there is one. Requirement ids are carried forward from
     it, and with `reuse` so is everything whose inputs have not changed: observations of unchanged
     files, the capabilities, where each observation was placed, and the requirements of any
@@ -48,8 +52,9 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
     # An unusable capabilities file is refused before any file is read or model called.
     from_file = capabilities.load()
     kept = before if reuse else None
-    found = discovery.discover(settings.include, settings.exclude, settings.default_excludes)
-    progress(f"discovered {len(found.files)} files to read, {len(found.left)} left out")
+    found = discovery.discover(settings.include, settings.exclude, settings.default_excludes, settings.follow)
+    progress(f"discovered {len(found.files)} files to read, {len(found.left)} left out"
+             + (f", {len(found.followed)} to follow calls into" if settings.follow else ""))
 
     triaged = None
     if settings.triage and triage is not None:
@@ -61,11 +66,22 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
                  f"{len(triaged.unresolved)} without a verdict (read), in {triaged.batches} batches")
     to_read = triaged.to_read(list(found.files)) if triaged else list(found.files)
 
+    follow = plan_follow(settings, to_read, found.followed, reach or ReachFacade(None), progress)
+    parts = follow.ranges() if follow else {}
+    followed = [f for f in found.followed if f.path in parts]
     earlier = earlier_evidence(kept, evidence.fingerprint()) if kept else None
-    observed = evidence.observe(to_read, earlier)
+    observed = evidence.observe([*to_read, *followed], earlier, parts)
     progress(f"observed {len(observed.observations)} verified, {len(observed.rejected)} rejected, "
              f"in {observed.batches} batches; {observed.reused_files} unchanged files reused, "
              f"{observed.partly_read_files} changed files read in part")
+    if observed.unobserved:
+        progress(f"{sum(map(len, observed.unobserved.values()))} functions in {len(observed.unobserved)} files "
+                 "have no observation even after a second look; they are listed in the diagnostics")
+    as_text = [path for path, mode in observed.analysis.items() if mode == "text"]
+    if as_text:
+        progress(f"{len(as_text)} of {len(observed.analysis)} files were read as text, without symbols: requirements "
+                 "cannot tell one function from another there and may join behaviour from different operations. "
+                 "Install the `treesitter` extra (pip install 'backspec[treesitter]') to read them by symbol.")
 
     if triaged is not None and triaged.audited:
         found_by_audit = {o.path for o in observed.observations} & set(triaged.audited)
@@ -102,7 +118,8 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
                    tokens_estimated=used.estimated, cost_usd=used.cost_usd, budget_reached=used.budget_reached,
                    usage_by_stage={s: StageUsage(**u) for s, u in used.by_stage.items()},
                    observe_fingerprint=evidence.fingerprint(), reused_files=observed.reused_files, **_analysis_counts(observed),
-                   partly_read_files=observed.partly_read_files, synthesis_fingerprint=requirements.fingerprint(),
+                   partly_read_files=observed.partly_read_files, followed_files=len(observed.read_in_part),
+                   synthesis_fingerprint=requirements.fingerprint(),
                    triage_fingerprint=triage.fingerprint() if triaged is not None and triage else "", **more)
 
     all_observations = sorted(observed.observations, key=lambda o: (o.path, o.lines[0], o.id))
@@ -110,15 +127,15 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         progress(f"orient failed: {orient_failed}")
         return ExtractionResult(
             run=describe("partial"), capabilities=[], requirements=[], observations=all_observations,
-            assignments={}, coverage=build_coverage(found, observed, [], {}),
-            diagnostics=Diagnostics(rejected=observed.rejected, failed_stages={"orient": orient_failed}))
+            assignments={}, coverage=build_coverage(found, observed, [], {}, follow=follow), follow=follow,
+            diagnostics=Diagnostics(rejected=observed.rejected, unobserved_functions=observed.unobserved, failed_stages={"orient": orient_failed}))
     if settings.gate:
         # Stopped on purpose: the run is `partial` and says where it stopped.
         progress("gate: stopping before assignment and synthesis; edit the file, then run again")
         gated = ExtractionResult(
             run=describe("partial", stopped_after="capabilities"), capabilities=caps, requirements=[],
-            observations=all_observations, assignments={}, coverage=build_coverage(found, observed, [], {}, triaged),
-            diagnostics=Diagnostics(rejected=observed.rejected, triage_unresolved=unresolved))
+            observations=all_observations, assignments={}, coverage=build_coverage(found, observed, [], {}, triaged, follow), follow=follow,
+            diagnostics=Diagnostics(rejected=observed.rejected, unobserved_functions=observed.unobserved, triage_unresolved=unresolved))
         gated.diagnostics.lint = lint_findings(gated)
         return gated
 
@@ -163,7 +180,7 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
     if settings.assess_support:
         unjudged = [r for r in final if r.support == "not_assessed"]
         if unjudged:
-            judged = {r.id: r for r in requirements.assess(unjudged, {f.path: f.lines for f in found.files})}
+            judged = {r.id: r for r in requirements.assess(unjudged, {f.path: f.lines for f in [*found.files, *followed]})}
             final = [judged.get(r.id, r) for r in final]
             counts = collections.Counter(r.support for r in final)
             progress("assessed support: " + ", ".join(f"{n} {s}" for s, n in sorted(counts.items())))
@@ -182,13 +199,31 @@ def run(root: str, provider: str, settings: Settings, discovery: DiscoveryFacade
         run=describe("complete" if complete else "partial", reused_capabilities=sorted(reused_capabilities)),
         capabilities=caps, requirements=final, hidden=sorted(hidden, key=lambda r: (r.capability, r.id)),
         observations=all_observations, assignments=assignments,
-        coverage=build_coverage(found, observed, [*final, *hidden], assignments, triaged),
-        diagnostics=Diagnostics(rejected=observed.rejected, failed_capabilities=synthesis.failed,
+        coverage=build_coverage(found, observed, [*final, *hidden], assignments, triaged, follow), follow=follow,
+        diagnostics=Diagnostics(rejected=observed.rejected, unobserved_functions=observed.unobserved, failed_capabilities=synthesis.failed,
                                 unconsolidated=synthesis.unconsolidated,
                                 dropped_scenarios=synthesis.dropped_scenarios, open_questions=open_questions,
                                 review=review_summary, triage_unresolved=unresolved))
     result.diagnostics.lint = lint_findings(result)
     return result
+
+
+def plan_follow(settings: Settings, seeds: list, candidates, reach: ReachFacade, progress: Progress) -> FollowReport | None:
+    """Which parts of the followed files to read, said out loud. None when nothing is followed."""
+    if not settings.follow:
+        return None
+    follow = reach.plan(list(seeds), list(candidates), settings.follow, settings.follow_depth)
+    if follow.unavailable:
+        progress(f"follow: {follow.unavailable}; {len(follow.files)} followed files not read")
+    elif not follow.files:
+        progress("follow: the --follow patterns matched no readable file outside the selection")
+    for f in follow.files:
+        progress(f"follow: {f.path}: {f.lines_read} of {f.lines} lines, {f.symbols} symbols reached"
+                 + (f" ({f.reason})" if f.reason else ""))
+    if follow.skipped or follow.ambiguous:
+        progress(f"follow: {len(follow.skipped)} called names not followed (generic or defined too often), "
+                 f"{len(follow.ambiguous)} followed to more than one definition; listed in the result")
+    return follow
 
 
 def _analysis_counts(observed) -> dict[str, int]:

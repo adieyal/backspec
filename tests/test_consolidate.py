@@ -106,3 +106,17 @@ def test_a_capability_synthesised_in_several_batches_is_consolidated(monkeypatch
     monkeypatch.setattr(use_cases, "SYNTH_BATCH", 2)
     result, llm, _ = run(reply_for(None, []), observed=4, made=2)
     assert len(result.requirements) == 4 and [r.stage for r in llm.requests].count("consolidate") == 1
+
+
+def test_the_function_each_citation_sits_in_is_shown_to_every_model_that_writes_or_judges_requirements():
+    from backspec.modules.evidence.domain import Observation
+    from backspec.modules.requirements.domain import Evidence, Requirement, assess_block, consolidate_input, synth_input
+    o = Observation(id="OBS-1", statement="Approval skips restaurants outside the group.", kind="permission",
+                    path="views.py", lines=(2, 2), quote="continue", source_hash="h", verified="exact",
+                    symbol="approve_hq_suggestions")
+    assert "views.py:2-2 | in approve_hq_suggestions" in synth_input([o])
+    evidence = Evidence(observation="OBS-1", role="establishes", path="views.py", lines=(2, 2), quote="continue",
+                        symbol="approve_hq_suggestions")
+    r = Requirement(id="REQ-1", capability="c", statement="S.", scope="local", evidence=[evidence])
+    assert "from: views.py:approve_hq_suggestions" in consolidate_input([r])
+    assert "views.py lines 2-2 | in approve_hq_suggestions" in assess_block(r, {"views.py": ["a", "continue", "b"]})

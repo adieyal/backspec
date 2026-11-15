@@ -88,8 +88,12 @@ From a clone of this repository, create a virtual environment and install backsp
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python3 -m pip install -e .
+python3 -m pip install -e '.[treesitter]'
 ```
+
+The `treesitter` extra lets backspec tell one function from another. Without it, files are
+read as plain text, and requirements may join behaviour from different views or endpoints.
+See [Optional language-aware parsing](#optional-language-aware-parsing).
 
 Replace `./my-service` below with the path to the codebase you want to understand.
 First, preview the files and estimated token usage. This sends nothing to a model:
@@ -117,6 +121,36 @@ Use gitignore-style patterns to focus on part of a project. You can repeat `--in
 ```bash
 backspec extract ./my-service --include "src/**" --exclude "**/migrations/**" -o reqs.json
 ```
+
+### Read only what the selected files call
+
+A behaviour often depends on code in a large shared file, such as a models module, that is too
+big to read in full. Name such files with `--follow` (gitignore-style, repeatable). They are
+read only where the selected files call into them:
+
+```bash
+backspec extract ./app --include "/views/orders.py" --follow "/models.py" --follow-depth 2 -o reqs.json
+```
+
+backspec parses the selected files with tree-sitter, collects the names they call (`foo(...)`
+and `x.foo(...)`), and reads the functions and methods of those names in the followed files.
+It then follows the calls in those bodies, up to `--follow-depth` calls away (default 2). In
+Python, an attribute used without a call (`run.signature = value`) reaches a `@property` or its
+setter. Calling a class's name reaches its `__init__`; its other methods are read only if called.
+Citations keep their real line numbers, and an observation outside the parts that were shown
+is rejected. Only the reached functions get a second look.
+
+Calls are matched by name, not by type, so a match can be wrong. Common names (`save`, `get`,
+`filter`, `create` and others listed in `GENERIC_NAMES` in `src/backspec/modules/reach/domain.py`)
+are never followed. A name defined more than three times in the followed files is not followed
+either. A name defined two or three times is followed to every definition, and that ambiguity
+is recorded. Calls through variables, `getattr` or framework hooks are not seen.
+
+The result's `follow` section lists each followed file with the lines read, every reached symbol
+with where it was called from, and every name not followed with the reason. Coverage marks
+these files `read: in_part`. `--dry-run` shows the same plan without calling a model.
+`backspec coverage` and the HTML report summarise it. Following needs the `treesitter` extra;
+without it, nothing is followed and the result says so.
 
 ## Review and update requirements
 
@@ -374,7 +408,10 @@ python3 -m pip install -e '.[treesitter]'
 
 This uses `tree-sitter-language-pack` for Python, JavaScript, TypeScript, TSX, Go, Java, Ruby,
 Rust, C# and PHP. It also adds the enclosing function, method or class name to observations
-and citations as `symbol`. The field `coverage.files[].analysis` records whether a file was
+and citations as `symbol`. The models that write and check requirements are shown that name,
+so that two operations which do similar things are not merged into one requirement. Any
+function in which the first reading recorded nothing is shown to a model a second time; those
+still empty are listed in `diagnostics.unobserved_functions` and in the report. The field `coverage.files[].analysis` records whether a file was
 read using `syntax` or `text` analysis.
 
 Other languages, missing parsers and parsing failures fall back to plain text. Use

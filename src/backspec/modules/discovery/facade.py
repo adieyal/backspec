@@ -12,5 +12,6 @@ class DiscoveryFacade:
     def __init__(self, repo: RepoPort):
         self._repo = repo
 
-    def discover(self, include: list[str], exclude: list[str], default_excludes: bool = True) -> Discovery:
-        return discover(self._repo, include, exclude, default_excludes)
+    def discover(self, include: list[str], exclude: list[str], default_excludes: bool = True,
+                 follow: list[str] | None = None) -> Discovery:
+        return discover(self._repo, include, exclude, default_excludes, follow)

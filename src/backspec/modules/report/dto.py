@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from backspec.modules.capabilities.facade import Capability
 from backspec.modules.evidence.facade import Observation, Rejected
 from backspec.modules.lint.facade import Finding
+from backspec.modules.reach.facade import FollowReport
 from backspec.modules.report.domain import FileCoverage
 from backspec.modules.requirements.facade import Requirement
 from backspec.modules.review.facade import ReviewSummary
@@ -36,6 +37,7 @@ class Run(BaseModel):
     partly_read_files: int = 0      # files changed since the previous result: only the changed parts were read
     syntax_files: int = 0           # files read with symbols from a parser
     text_files: int = 0             # files read as plain text
+    followed_files: int = 0         # files not selected but read in part, where the selected files call into them
     synthesis_fingerprint: str = ""  # how requirements were written and judged
     triage_fingerprint: str = ""    # how files were triaged; a later run reuses verdicts only if it matches
     reused_capabilities: list[str] = Field(default_factory=list)   # evidence unchanged, requirements kept
@@ -75,6 +77,7 @@ class Diagnostics(BaseModel):
     review: ReviewSummary | None = None   # set when ids were carried forward or a review file applied
     lint: list[Finding] = Field(default_factory=list)   # deterministic checks on the finished result
     failed_stages: dict[str, str] = Field(default_factory=dict)   # a stage the whole run depends on -> why it failed
+    unobserved_functions: dict[str, list[str]] = Field(default_factory=dict)   # path -> functions with no observation, even after a second look
 
 
 class ExtractionResult(BaseModel):
@@ -87,6 +90,7 @@ class ExtractionResult(BaseModel):
     assignments: dict[str, str] = Field(default_factory=dict)   # observation id -> capability id
     coverage: Coverage
     diagnostics: Diagnostics = Field(default_factory=Diagnostics)
+    follow: FollowReport | None = None   # set when calls were followed into other files: what was read and what was not
 
     def to_json(self) -> str:
         return self.model_dump_json(indent=1)
