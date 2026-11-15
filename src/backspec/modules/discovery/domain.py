@@ -46,6 +46,7 @@ class Left:
 class Discovery:
     files: tuple[SourceFile, ...]
     left: tuple[Left, ...]
+    followed: tuple[SourceFile, ...] = ()   # not selected, but read in part where the selected files call into them
 
 
 @lru_cache(maxsize=64)
@@ -70,6 +71,13 @@ def excluded_by_pattern(path: str, include: list[str], exclude: list[str],
     if exclude and _spec(exclude).match_file(path):
         return "exclude_pattern"
     return None
+
+
+def followed(path: str, follow: list[str], exclude: list[str], default_excludes: bool = True) -> bool:
+    """A file left out only for not being included, that a follow pattern names. An exclusion
+    still wins: a followed file must not be excluded by default or by pattern."""
+    return bool(follow) and excluded_by_pattern(path, [], exclude, default_excludes) is None \
+        and _spec(follow).match_file(path)
 
 
 def read_or_skip(path: str, data: bytes) -> SourceFile | Left:

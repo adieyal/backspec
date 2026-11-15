@@ -1,12 +1,17 @@
 # Assign stage
 
 At the end of this message are the capabilities of one software product, then a list of
-observations about it. Each observation line is `OBS-id | statement`; `## path` lines say which
+observations about it. Each observation line is `OBS-id | kind | statement`; `## path` lines say which
 source file the following observations came from.
 
 Assign every observation to exactly one capability id from the list: the one whose behaviour
 the observation is evidence for. Judge by what the statement says, not by the file it came
-from. Use `plumbing` only for internal mechanics no user or operator would notice.
+from. Use `plumbing` only for internal mechanics no user, operator or calling system would
+notice. A refusal, an error a caller gets back, a permission check, input validation, a change
+that is saved, or anything shown is never plumbing, however technical it reads: place it with
+the capability whose operation it belongs to. Observations of kind `entry_point`, `permission`,
+`validation`, `state_change`, `error_path`, `display` and `test_case` placed in `plumbing` are
+asked about again.
 
 ## Output
 

@@ -16,6 +16,11 @@ user, operator or calling system could notice. Look in particular for:
 - a rule for deciding something: a status, a category, an ordering
 - what a test shows the product doing in a concrete case
 - what is displayed to the user and when
+- a guarantee a caller can rely on: work done in one transaction, a row locked against
+  concurrent changes, a notification sent only once the change is saved
+
+Record every entry point (a route, a view, a command handler) at least once, even one that only
+hands the work on to other code: say what it accepts, what it refuses and what it hands on.
 
 Skip pure plumbing: imports, logging, formatting helpers, type declarations with no rule in
 them. If a file holds nothing worth recording, list it under `none` with a short reason.
@@ -36,6 +41,20 @@ them. If a file holds nothing worth recording, list it under `none` with a short
 7. Write each `statement` as one plain sentence about the product, for example "A rule whose
    test fails is given the status Broken." Do not mention function or variable names unless
    the user would see them.
+8. Keep every condition. When the code checks, filters or restricts by several things, the
+   statement names all of them. "Auto-created issues with this text are deleted" is wrong when
+   the code also requires the issue to have no photo: the statement must say so.
+9. Read the lines around the ones you cite, and do not describe a line in a way its neighbours
+   contradict. A field kept for compatibility next to a fuller one (a single `issue` beside a
+   list of every `issues`), a default that is overwritten later, or a comment stating what the
+   code is for all change what the cited line means.
+10. Say only what the code does with a value. A value worked out but not shown being returned,
+    saved, sent or displayed is not something anyone sees: do not say it is "shown" or that
+    something "is named" it.
+11. Say which operation a fact belongs to whenever the file has more than one that could fit,
+    for example "When approving suggestions from the HQ page, ..." rather than "When approving
+    suggestions, ...". Two views, pages or endpoints that do similar things are different
+    operations, and a reader must be able to tell them apart from the statement alone.
 
 ## Output
 

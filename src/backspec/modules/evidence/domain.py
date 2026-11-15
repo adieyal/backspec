@@ -147,6 +147,26 @@ def enclosing_symbol(symbols: list[Symbol] | None, first: int, last: int) -> str
     return best.name if best else None
 
 
+MIN_SYMBOL_LINES = 3   # a function shorter than this is not worth a second look
+
+
+def unobserved(symbols: list[Symbol] | None, cited: list[tuple[int, int]]) -> list[Symbol]:
+    """The functions and methods no observation touches, outermost first: those not inside another
+    function, of at least MIN_SYMBOL_LINES lines. An entry point that only delegates is still
+    behaviour (what it accepts, what it refuses, what it hands on), so a reading that recorded
+    nothing in it has probably missed something."""
+    callables = [s for s in symbols or [] if s.kind in ("function", "method")]
+    out = []
+    for symbol in callables:
+        nested = any(o is not symbol and o.first_line <= symbol.first_line and symbol.last_line <= o.last_line
+                     and (o.first_line, -o.last_line) != (symbol.first_line, -symbol.last_line) for o in callables)
+        if nested or symbol.last_line - symbol.first_line + 1 < MIN_SYMBOL_LINES:
+            continue
+        if not any(a <= symbol.last_line and symbol.first_line <= b for a, b in cited):
+            out.append(symbol)
+    return sorted(out, key=lambda s: s.first_line)
+
+
 def pack(chunks: list[Chunk], limit: int) -> list[list[Chunk]]:
     """Chunks grouped into batches of at most `limit` lines, in order."""
     batches: list[list[Chunk]] = []

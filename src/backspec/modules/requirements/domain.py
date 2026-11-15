@@ -111,9 +111,19 @@ class AssessReply(BaseModel):
 def synth_input(observations: list[Observed]) -> str:
     out: list[str] = []
     for o in sorted(observations, key=lambda o: (o.path, o.lines[0])):
-        out += [f"{o.id} | {o.kind} | {o.path}:{o.lines[0]}-{o.lines[1]}", f"  {o.statement}",
-                f"  quote: {o.quote[:160]}", ""]
+        out += [f"{o.id} | {o.kind} | {o.path}:{o.lines[0]}-{o.lines[1]}{_in(getattr(o, 'symbol', None))}",
+                f"  {o.statement}", f"  quote: {o.quote[:160]}", ""]
     return "\n".join(out)
+
+
+def _in(symbol: str | None) -> str:
+    """Where a citation sits, as ` | in name`, so that two operations are not taken for one."""
+    return f" | in {symbol}" if symbol else ""
+
+
+def _places(evidence: list[Evidence]) -> str:
+    """The distinct places a requirement's evidence comes from: the symbol, or the file without one."""
+    return ", ".join(dict.fromkeys(f"{e.path}:{e.symbol}" if e.symbol else e.path for e in evidence))
 
 
 def _copied(cited: list[CitedObservation], known: dict[str, Observed]) -> list[Evidence]:
@@ -181,7 +191,8 @@ def consolidate_input(requirements: list[Requirement]) -> str:
         out += [f"{r.id} | {r.level}", f"  statement: {r.statement}"]
         if r.conditions:
             out.append("  conditions: " + " ; ".join(r.conditions))
-        out += ["  observations: " + ", ".join(e.observation for e in r.evidence), ""]
+        out += ["  observations: " + ", ".join(e.observation for e in r.evidence),
+                "  from: " + _places(r.evidence), ""]
     return "\n".join(out)
 
 
@@ -252,7 +263,7 @@ def assess_block(requirement: Requirement, file_lines: dict[str, list[str]]) -> 
         lines = file_lines[evidence.path]
         first, last = evidence.lines[0], min(evidence.lines[1], evidence.lines[0] + MAX_SPAN_SHOWN)
         start, end = max(1, first - CONTEXT_LINES), min(len(lines), last + CONTEXT_LINES)
-        out.append(f"--- evidence {number}: {evidence.path} lines {first}-{last}")
+        out.append(f"--- evidence {number}: {evidence.path} lines {first}-{last}{_in(evidence.symbol)}")
         for text in numbered(lines[start - 1:end], start):
             line_number = int(text[:5])
             out.append((">" if first <= line_number <= last else " ") + text)

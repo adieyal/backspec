@@ -10,10 +10,9 @@ import typer
 
 from backspec.host.adapters.cache_admin import NotACache, describe
 from backspec.host.composition import (CAPABILITIES_FILE, Config, cache_clear, cache_info, default_previous, extract,
-                                   load_result, orient, review_requirement, status, validate, write_tree)
+                                   load_result, orient, preview, review_requirement, status, validate, write_tree)
 from backspec.kernel.llm import LLMError
 from backspec.modules.capabilities.facade import CapabilitiesFileError
-from backspec.modules.discovery.facade import DiscoveryFacade
 from backspec.modules.lint.facade import summary as lint_summary
 from backspec.modules.report.facade import (ExtractionResult, RenderOutput, coverage_report, coverage_text, formats,
                                         render)
@@ -103,31 +102,50 @@ def extract_command(
     triage_audit: float = typer.Option(0.1, "--triage-audit", metavar="FRACTION",
                                        help="Share of the files triage skips that are read anyway, to check "
                                             "triage. 0 turns the audit off, 1.0 reads everything triage skips."),
+    follow: Annotated[list[str], typer.Option("--follow", help="Gitignore-style pattern naming files that are read "
+                                              "only where the selected files call into them. Repeatable.")] = [],
+    follow_depth: int = typer.Option(2, "--follow-depth", min=1, help="How many calls away from the selected files "
+                                     "to follow into the --follow files."),
 ) -> None:
     """Run the pipeline on PATH."""
     _check_format(fmt, output)
     if not 0 <= triage_audit <= 1:
         raise typer.BadParameter("--triage-audit must be between 0 and 1")
-    if dry_run:
-        from backspec.host.adapters.filesystem import DiskRepo
-        found = DiscoveryFacade(DiskRepo(path)).discover(include, exclude, not no_default_excludes)
-        lines = sum(len(f.lines) for f in found.files)
-        for source in found.files:
-            typer.echo(f"read      {source.path}")
-        for left in found.left:
-            typer.echo(f"{left.state:9s} {left.path}  ({left.reason})")
-        tokens = sum(len("\n".join(f.lines)) for f in found.files) // 4
-        _say(f"{len(found.files)} files, {lines} lines to read; {len(found.left)} left out. "
-             f"About {max(1, lines // 1300)} observe calls, about {tokens} tokens to read (estimated, "
-             f"characters / 4). Nothing was sent to a model.")
-        raise typer.Exit(0)
     config = Config(include=include, exclude=exclude, default_excludes=not no_default_excludes,
                     assess_support=not no_assess_support, provider=provider, fast_model=fast_model,
                     strong_model=model, concurrency=concurrency, cache_dir=cache_dir,
                     use_cache=not no_cache, replay=replay, capabilities_file=capabilities, gate=gate,
                     review_file=review, previous=default_previous(previous, output, fmt), reuse=not no_reuse,
                     max_tokens=max_tokens, syntax=not text_only,
-                    triage=not no_triage, triage_audit=triage_audit)
+                    triage=not no_triage, triage_audit=triage_audit, follow=follow, follow_depth=follow_depth)
+    if dry_run:
+        found, followed = preview(path, config)
+        lines = sum(len(f.lines) for f in found.files)
+        for source in found.files:
+            typer.echo(f"read      {source.path}")
+        for left in found.left:
+            typer.echo(f"{left.state:9s} {left.path}  ({left.reason})")
+        tokens = sum(len("\n".join(f.lines)) for f in found.files) // 4
+        if followed is not None:
+            by_path = {f.path: f for f in found.followed}
+            for part in followed.files:
+                typer.echo(f"in part   {part.path}  ({part.lines_read} of {part.lines} lines, {part.symbols} symbols"
+                           + (f"; {part.reason}" if part.reason else "") + ")")
+                lines += part.lines_read
+                tokens += sum(len(line) + 1 for a, b in part.ranges for line in by_path[part.path].lines[a - 1:b]) // 4
+            for reached in followed.reached:
+                typer.echo(f"  reached {reached.path}:{reached.lines[0]}-{reached.lines[1]} {reached.symbol} "
+                           f"(depth {reached.depth}, from {reached.called_from[0]})")
+            for name in followed.skipped:
+                typer.echo(f"  not followed: {name.name} ({name.reason}, defined {name.definitions} times)")
+            for name in followed.ambiguous:
+                typer.echo(f"  ambiguous: {name.name} -> {', '.join(name.definitions)}")
+            if followed.unavailable:
+                _say(f"follow: {followed.unavailable}")
+        _say(f"{len(found.files)} files, {lines} lines to read; {len(found.left)} left out. "
+             f"About {max(1, lines // 1300)} observe calls, about {tokens} tokens to read (estimated, "
+             f"characters / 4). Nothing was sent to a model.")
+        raise typer.Exit(0)
     try:
         result = extract(path, config, progress=_say)
     except ERRORS as error:

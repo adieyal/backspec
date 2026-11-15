@@ -16,8 +16,10 @@ class EvidenceFacade:
         self._syntax = syntax
         self._workers = workers
 
-    def observe(self, files: list[SourceFile], earlier: dict[str, Earlier] | None = None) -> ObservationSet:
-        return observe(files, self._llm, self._workers, earlier=earlier, syntax=self._syntax)
+    def observe(self, files: list[SourceFile], earlier: dict[str, Earlier] | None = None,
+                parts: dict[str, list[tuple[int, int]]] | None = None) -> ObservationSet:
+        """`parts`: files of which only these line ranges are read (path -> ranges)."""
+        return observe(files, self._llm, self._workers, earlier=earlier, syntax=self._syntax, parts=parts)
 
     def fingerprint(self) -> str:
         """Identifies the way files are observed; earlier observations made another way are not reused."""

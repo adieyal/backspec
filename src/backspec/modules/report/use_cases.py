@@ -5,6 +5,7 @@ import collections
 
 from backspec.modules.discovery.facade import Discovery
 from backspec.modules.evidence.facade import Earlier, ObservationSet, line_digest
+from backspec.modules.reach.facade import FollowReport
 from backspec.modules.report.domain import CoverageReport, FileCoverage, file_state, worth_looking_at
 from backspec.modules.report.dto import Coverage, ExtractionResult, TriageAudit
 from backspec.modules.requirements.facade import Requirement
@@ -12,7 +13,8 @@ from backspec.modules.triage.facade import EarlierVerdict, TriageResult, Verdict
 
 
 def build_coverage(discovery: Discovery, observed: ObservationSet, requirements: list[Requirement],
-                   assignments: dict[str, str], triage: TriageResult | None = None) -> Coverage:
+                   assignments: dict[str, str], triage: TriageResult | None = None,
+                   follow: FollowReport | None = None) -> Coverage:
     per_file = collections.Counter(o.path for o in observed.observations)
     rejected = collections.Counter(r.path for r in observed.rejected)
     nothing = {entry.path: entry.reason for entry in observed.nothing}
@@ -37,6 +39,22 @@ def build_coverage(discovery: Discovery, observed: ObservationSet, requirements:
             triage_role=verdict.role if verdict else "", triage_relevance=verdict.relevance if verdict else "",
             triage_skipped=out, triage_audited=out and read,
             found_by_audit=out and read and per_file[source.path] > 0))
+    reached = collections.Counter(r.path for r in follow.reached) if follow else collections.Counter()
+    unread = {f.path: f.reason for f in follow.files} if follow else {}
+    for source in discovery.followed:
+        total = len(source.text.splitlines())
+        if source.path not in observed.read_in_part:
+            # followed, but nothing of it was read: no call reached it, or it could not be parsed
+            files.append(FileCoverage(path=source.path, state="skipped", lines=total, read="in_part", reached=0,
+                                      reason="followed: " + (unread.get(source.path) or "nothing of it was reached")))
+            continue
+        failed = observed.failed.get(source.path)
+        state, reason = file_state(per_file[source.path], rejected[source.path], failed, nothing.get(source.path))
+        files.append(FileCoverage(
+            path=source.path, state=state, reason=reason, observations=per_file[source.path],
+            rejected=rejected[source.path], lines=total, analysis=observed.analysis.get(source.path, "text"),
+            cited_by=cited[source.path], source_hash=source.source_hash, read="in_part",
+            lines_read=observed.read_in_part[source.path], reached=reached[source.path]))
     files.sort(key=lambda f: f.path)
     used = {e.observation for r in requirements for e in r.evidence}
     unused = collections.Counter(assignments.get(o.id, "unassigned") for o in observed.observations if o.id not in used)
@@ -71,7 +89,9 @@ def coverage_report(result: ExtractionResult) -> CoverageReport:
             by_state.setdefault(entry.state, []).append(entry)
     return CoverageReport(counts=dict(result.coverage.summary), files=dict(sorted(by_state.items())),
                           unused_observations=dict(result.coverage.unused_observations),
-                          worth_a_look=[e for e in result.coverage.files if worth_looking_at(e)])
+                          worth_a_look=[e for e in result.coverage.files if worth_looking_at(e) and e.read == "full"],
+                          read_in_part=[e for e in result.coverage.files if e.read == "in_part"],
+                          not_followed={s.name: s.reason for s in result.follow.skipped} if result.follow else {})
 
 
 def earlier_evidence(previous: ExtractionResult, fingerprint: str) -> dict[str, Earlier]:
@@ -85,6 +105,8 @@ def earlier_evidence(previous: ExtractionResult, fingerprint: str) -> dict[str, 
     earlier = {}
     for covered in previous.coverage.files:
         audited_blank = covered.state == "triaged_out" and covered.triage_audited   # read by the audit, nothing found
+        if covered.read == "in_part":
+            continue   # only parts were read: what was found there says nothing of the rest of the file
         if covered.source_hash and (covered.state in ("extracted", "no_requirements") or audited_blank):
             earlier[covered.path] = Earlier(
                 source_hash=covered.source_hash, observations=tuple(by_path.get(covered.path, [])),
@@ -104,6 +126,9 @@ def to_markdown(result: ExtractionResult, include_technical: bool = False) -> st
     summary = ", ".join(f"{count} {state}" for state, count in sorted(result.coverage.summary.items()))
     out += [f"{len(result.requirements)} requirements from {len(result.observations)} verified observations. "
             f"Files: {summary}. Run status: {result.run.status}.", ""]
+    if result.follow and result.follow.files:
+        parts = "; ".join(f"`{f.path}` {f.lines_read} of {f.lines} lines ({f.symbols} symbols)" for f in result.follow.files)
+        out += [f"Read in part, following calls up to depth {result.follow.depth}: {parts}.", ""]
     for capability in result.capabilities:
         requirements = by_capability.get(capability.id)
         if not requirements:

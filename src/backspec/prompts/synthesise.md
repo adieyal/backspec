@@ -8,9 +8,12 @@ user or operator would state them.
 The capability's name and summary come at the end of this message, followed by the
 observations. Each observation is one block:
 
-    OBS-id | kind | path:first-last
+    OBS-id | kind | path:first-last | in name
       statement
       quote: a line copied from the code
+
+`in name` is the function or method the observation sits in. It is missing when the program
+could not tell.
 
 ## What a requirement is
 
@@ -22,11 +25,18 @@ observations. Each observation is one block:
   front end and the tests. Combine them into one requirement and list all of them as evidence.
 - Many observations describe the same behaviour from different files. Merge them. Do not
   write one requirement per observation.
+- Do not merge different operations. Observations from different functions, views or
+  endpoints that do similar things (two pages that list procedures, two ways of approving a
+  change) are different operations unless they show the same behaviour. When the behaviour
+  differs between them (a different permission check, sort order, title or message), write one
+  requirement per operation and say which operation each is. A condition seen in one operation
+  must never be stated for another.
 
 ## Rules
 
 1. Use only what the observations say. Do not add reasons, guarantees or outcomes that no
-   observation states.
+   observation states. Do not drop a condition an observation states either: a requirement
+   that leaves one out claims more than the code does.
 2. Every requirement lists the ids of the observations it rests on, copied exactly. You cannot
    cite anything else. An id you invent or alter makes the requirement invalid.
 3. Give each cited observation a role:
@@ -50,9 +60,12 @@ observations. Each observation is one block:
    - a requirement that only restates another from its test, or only adds a detail of wording.
    The right grain is what a product owner would list as "what this capability does". Before
    you answer, read your list again and merge any two that a reviewer would test together.
-   It is fine to leave trivia unused. Aim for roughly one requirement for every five to ten
-   observations, usually between 5 and 20 in all, and never more than one for every three
-   observations.
+   It is fine to leave trivia unused, but not a refusal, an error, a permission check or a
+   change that is saved: each of those belongs in some requirement. Aim for roughly one
+   requirement for every five to ten observations, usually between 5 and 20 in all. These
+   numbers never justify joining different operations or unrelated behaviours into one
+   statement: a requirement that strings several behaviours together with "and" and ";" is
+   too coarse, and should be split.
 
 ## Scenarios
 

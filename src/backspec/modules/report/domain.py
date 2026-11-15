@@ -31,6 +31,9 @@ class FileCoverage(BaseModel):
     triage_skipped: bool = False   # triage judged it surely irrelevant, so it was not read unless audited
     triage_audited: bool = False   # skipped by triage but read anyway, as part of the audit
     found_by_audit: bool = False   # audited, and a verified observation came of it
+    read: Literal["full", "in_part"] = "full"   # in_part: a followed file, read only where the selected files call into it
+    lines_read: int = 0            # for a file read in part: the lines shown to a model
+    reached: int = 0               # for a followed file: the symbols the selected files reach in it
 
 
 def file_state(observations: int, rejected: int, failed: str | None, nothing_reason: str | None) -> tuple[State, str]:
@@ -101,6 +104,8 @@ class CoverageReport(BaseModel):
     files: dict[str, list[FileCoverage]]   # state -> files, every state but `excluded`
     unused_observations: dict[str, int]    # capability -> observations no requirement cites
     worth_a_look: list[FileCoverage]
+    read_in_part: list[FileCoverage] = []   # followed files: read only where the selected files call into them
+    not_followed: dict[str, str] = {}       # called name -> why it was not followed (generic or ambiguous)
 
 
 def worth_looking_at(entry: FileCoverage) -> bool:
@@ -125,4 +130,12 @@ def coverage_text(report: CoverageReport, show_all: bool = False) -> str:
     out += ["", "worth a look (read, over %d lines, no observation or cited by no requirement):" % WORTH_A_LOOK_LINES]
     out += _clip([f"  {e.path}  ({e.lines} lines, {e.observations} observations, cited by {e.cited_by})"
                   for e in report.worth_a_look] or ["  none"], show_all)
+    if report.read_in_part:
+        out += ["", "read in part (followed: only what the selected files call):"]
+        out += _clip([f"  {e.path}  ({e.lines_read} of {e.lines} lines, {e.reached} symbols reached, "
+                      f"{e.observations} observations, cited by {e.cited_by})" for e in report.read_in_part], show_all)
+        if report.not_followed:
+            names = sorted(report.not_followed)
+            shown = names if show_all or len(names) <= TRUNCATE_AT else names[:TRUNCATE_AT] + ["..."]
+            out.append(f"  calls not followed ({len(names)}, generic or defined too often): " + ", ".join(shown))
     return "\n".join(out)

@@ -10,6 +10,7 @@ import os
 from pathlib import PurePosixPath
 
 from backspec.modules.evidence.domain import Symbol
+from backspec.modules.reach.domain import Call
 
 # One grammar per extension.
 GRAMMARS = {
@@ -42,6 +43,18 @@ DEFINITIONS = {
 }
 # Where a definition's name is, when it is not the `name` field.
 NAME_FIELD = {"impl_item": "type"}
+# Per grammar: node type of a call -> field holding what is called (None: the call node names it itself).
+_JS_CALLS = {"call_expression": "function", "new_expression": "constructor"}
+CALLS = {
+    "python": {"call": "function"}, "javascript": _JS_CALLS, "typescript": _JS_CALLS, "tsx": _JS_CALLS,
+    "go": {"call_expression": "function"}, "java": {"method_invocation": None, "object_creation_expression": "type"},
+    "ruby": {"call": None}, "rust": {"call_expression": "function"}, "csharp": {"invocation_expression": "function"},
+    "php": {"function_call_expression": "function", "member_call_expression": None, "scoped_call_expression": None},
+}
+PROPERTY_DECORATORS = {"property", "cached_property"}
+# The last name of a callee: `foo` in `foo(...)`, `x.foo(...)` and `a.b.foo(...)`.
+IDENTIFIERS = {"identifier", "property_identifier", "field_identifier", "type_identifier", "constant", "name"}
+CALLEE_FIELDS = ("attribute", "property", "field", "name", "method")
 # `const f = () => {}` and the like define a function through a variable.
 FUNCTION_VALUES = {"arrow_function", "function_expression", "function"}
 # Nodes that wrap a definition and belong to it (decorators, `export`, `const`).
@@ -76,9 +89,73 @@ class TreeSitterSyntax:
         except Exception:
             return None
 
+    def _tree(self, path: str, text: str):
+        grammar = GRAMMARS.get(PurePosixPath(path).suffix.lower())
+        if grammar is None:
+            return None, None
+        try:
+            parser = self._parsers.get(grammar)
+            if parser is None:
+                parser = self._parsers[grammar] = self._get_parser(grammar)
+            return grammar, parser.parse(text.encode("utf-8"))
+        except Exception:
+            return None, None
+
+    def calls(self, path: str, text: str) -> list[Call] | None:
+        """Every name called in a file, with the line of the call; in Python, also every attribute
+        used without a call (`x.foo`, `x.foo = 1`), which can only reach a property."""
+        grammar, tree = self._tree(path, text)
+        if tree is None:
+            return None
+        table, found, stack = CALLS[grammar], [], [tree.root_node]
+        callees = set()
+        while stack:
+            node = stack.pop()
+            if node.type in table:
+                field = table[node.type]
+                callee = node.child_by_field_name(field) if field else node
+                name = _callee_name(callee) if callee is not None else None
+                if name:
+                    found.append(Call(name, node.start_point[0] + 1))
+                    callees.add(callee.id)
+            elif grammar == "python" and node.type == "attribute" and node.id not in callees:
+                named = node.child_by_field_name("attribute")
+                if named is not None:
+                    found.append(Call(_text(named), node.start_point[0] + 1, called=False))
+            stack.extend(reversed(node.children))
+        return sorted(found, key=lambda c: (c.line, c.name, not c.called))
+
+    def properties(self, path: str, text: str) -> set[int] | None:
+        """First lines of Python definitions decorated as properties (or their setters and deleters)."""
+        grammar, tree = self._tree(path, text)
+        if tree is None:
+            return None
+        if grammar != "python":
+            return set()
+        found, stack = set(), [tree.root_node]
+        while stack:
+            node = stack.pop()
+            if node.type == "decorated_definition":
+                names = [_text(d).lstrip("@").strip() for d in node.children if d.type == "decorator"]
+                if any(n in PROPERTY_DECORATORS or n.rsplit(".", 1)[-1] in PROPERTY_DECORATORS
+                       or n.endswith((".setter", ".getter", ".deleter")) for n in names):
+                    found.add(node.start_point[0] + 1)
+            stack.extend(node.children)
+        return found
+
 
 def _text(node) -> str:
     return node.text.decode("utf-8", "replace")
+
+
+def _callee_name(node) -> str | None:
+    if node.type in IDENTIFIERS:
+        return _text(node)
+    for field in CALLEE_FIELDS:
+        named = node.child_by_field_name(field)
+        if named is not None and named.type in IDENTIFIERS:
+            return _text(named)
+    return None
 
 
 def _go_receiver(node) -> str:
