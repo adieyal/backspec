@@ -22,7 +22,7 @@ from backspec.modules.requirements.facade import Requirement, RequirementsFacade
 from backspec.modules.review.facade import ReviewFacade, ReviewSummary
 from backspec.modules.triage.facade import DEFAULT_AUDIT, TriageFacade
 
-TOOL_VERSION = "0.0.1"
+TOOL_VERSION = "0.0.2"
 Progress = Callable[[str], None]
 
 
